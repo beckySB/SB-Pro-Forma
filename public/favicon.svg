@@ -1,4 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="4" fill="#130702"/>
-  <text x="16" y="21" text-anchor="middle" font-family="Georgia,serif" font-size="14" font-weight="700" fill="#B58A4B">SB</text>
+  <rect width="32" height="32" rx="6" fill="#130702"/>
+  <!-- Alligator body -->
+  <g fill="#B58A4B">
+    <!-- Head/snout -->
+    <path d="M6,14 L14,12 L14,16 L6,18 Z"/>
+    <!-- Upper jaw -->
+    <path d="M6,14 L3,13.5 L3,14.5 L6,14.5Z"/>
+    <!-- Lower jaw (open) -->
+    <path d="M6,17.5 L3,18.5 L3,17.5 L6,17Z"/>
+    <!-- Body -->
+    <ellipse cx="17" cy="15" rx="5" ry="3.5"/>
+    <!-- Tail -->
+    <path d="M22,14 Q26,12 29,8" stroke="#B58A4B" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <!-- Legs -->
+    <rect x="13" y="17.5" width="2" height="3" rx="0.5"/>
+    <rect x="19" y="17.5" width="2" height="3" rx="0.5"/>
+    <!-- Eye -->
+    <circle cx="10" cy="13" r="1.2" fill="#130702"/>
+    <circle cx="10" cy="13" r="0.6" fill="#FDF4E2"/>
+    <!-- Teeth -->
+    <path d="M4,14.5 L4.5,15.5 L5,14.5 L5.5,15.5 L6,14.5" stroke="#FDF4E2" stroke-width="0.4" fill="none"/>
+    <path d="M4,17.5 L4.5,16.5 L5,17.5 L5.5,16.5 L6,17.5" stroke="#FDF4E2" stroke-width="0.4" fill="none"/>
+    <!-- Ridges on back -->
+    <path d="M14,11.5 L15,10.5 L16,11.5 L17,10.2 L18,11.5 L19,10.5 L20,11.5" stroke="#D7B878" stroke-width="0.8" fill="none" stroke-linejoin="round"/>
+  </g>
+  <!-- Bayou water line -->
+  <path d="M2,24 Q6,22 10,24 Q14,26 18,24 Q22,22 26,24 Q28,25 30,24" stroke="#4F5B45" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M2,26 Q6,24 10,26 Q14,28 18,26 Q22,24 26,26 Q28,27 30,26" stroke="#4F5B45" stroke-width="0.7" fill="none" opacity="0.3"/>
 </svg>
