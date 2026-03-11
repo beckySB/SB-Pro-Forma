@@ -1,4 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 50">
-  <text x="0" y="18" font-family="'Barlow Semi Condensed',sans-serif" font-size="16" font-weight="600" fill="#FDF4E2" letter-spacing="3">SILICON</text>
-  <text x="0" y="42" font-family="'Barlow Semi Condensed',sans-serif" font-size="28" font-weight="700" fill="#FDF4E2" letter-spacing="1">bayou</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 44">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700');</style>
+  <text x="2" y="16" font-family="'Barlow Semi Condensed',Arial,sans-serif" font-size="14" font-weight="600" fill="#FDF4E2" letter-spacing="4">SILICON</text>
+  <text x="2" y="39" font-family="'Barlow Semi Condensed',Arial,sans-serif" font-size="26" font-weight="700" fill="#FDF4E2" letter-spacing="1">bayou</text>
 </svg>
