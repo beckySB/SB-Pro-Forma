@@ -133,7 +133,7 @@ app.post('/api/founders', (req, res) => {
   try {
     const existing = db.prepare('SELECT id FROM founders WHERE email = ?').get(email);
     if (existing) {
-      db.prepare('UPDATE founders SET name=?, company_name=?, updated_at=datetime("now") WHERE email=?').run(name, company_name, email);
+      db.prepare(`UPDATE founders SET name=?, company_name=?, updated_at=datetime('now') WHERE email=?`).run(name, company_name, email);
       return res.json({ success: true, founder_id: existing.id, existing: true });
     }
     const result = db.prepare('INSERT INTO founders (email, name, company_name) VALUES (?, ?, ?)').run(email, name, company_name);
@@ -160,13 +160,13 @@ app.post('/api/responses', (req, res) => {
     // Update founder phase/vertical if relevant questions
     if (module_number === 1 && question_number === 5) {
       const phaseMap = { 'Idea': 'idea', 'Pre-Seed': 'pre_seed', 'Seed': 'seed', 'Series A+': 'series_a' };
-      db.prepare('UPDATE founders SET phase=?, updated_at=datetime("now") WHERE id=?').run(phaseMap[response_value] || 'idea', founder_id);
+      db.prepare(`UPDATE founders SET phase=?, updated_at=datetime('now') WHERE id=?`).run(phaseMap[response_value] || 'idea', founder_id);
     }
     if (module_number === 1 && question_number === 2) {
-      db.prepare('UPDATE founders SET vertical=?, updated_at=datetime("now") WHERE id=?').run(response_value, founder_id);
+      db.prepare(`UPDATE founders SET vertical=?, updated_at=datetime('now') WHERE id=?`).run(response_value, founder_id);
     }
     if (module_number === 1 && question_number === 3) {
-      db.prepare('UPDATE founders SET customer_type=?, updated_at=datetime("now") WHERE id=?').run(response_value, founder_id);
+      db.prepare(`UPDATE founders SET customer_type=?, updated_at=datetime('now') WHERE id=?`).run(response_value, founder_id);
     }
 
     res.json({ success: true });
