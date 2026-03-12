@@ -414,18 +414,18 @@
       fetch(API+'/api/founders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,name:name,company_name:company})})
       .then(function(r){return r.json();}).then(function(d){
         if(d.success){state.founder_id=d.founder_id;state.email=email;
-          // Auto-save company name as Q1 answer
           state.responses['1_1']=company;
+          state.currentModule=1;state.currentQ=1;
+          // Save company name in background, don't wait
           saveResponse('1_1',company);
-          // Load existing responses then go to intake
-          fetch(API+'/api/responses/'+d.founder_id).then(function(r){return r.json();}).then(function(rd){
-            Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
-            if(!state.responses['1_1'])state.responses['1_1']=company;
-          }).catch(function(){}).finally(function(){
-            // Skip Q1 (company name) since we already have it
-            state.currentModule=1;state.currentQ=1;
-            location.hash='intake';
-          });
+          // Load existing responses in background for returning users
+          if(d.existing){
+            fetch(API+'/api/responses/'+d.founder_id).then(function(r){return r.json();}).then(function(rd){
+              Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
+            }).catch(function(){});
+          }
+          // Navigate immediately
+          location.hash='intake';
         }else{document.getElementById('startError').textContent=d.error||'Error';document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='Begin Discovery →';}
       }).catch(function(e){document.getElementById('startError').textContent=e.message;document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='Begin Discovery →';});
     });
