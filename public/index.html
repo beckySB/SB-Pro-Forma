@@ -236,6 +236,147 @@
 
   var totalQuestions = MODULES.reduce(function(s,m){return s+m.questions.length;},0);
 
+  // ─── Discovery Calculators ─────────────────
+  // Probing sub-questions that help founders arrive at their actual number
+  var PROBES = {
+    '1_6': { // Team Size
+      title: 'Let\'s count your team',
+      fields: [
+        {id:'p_founders',label:'Founders (full-time)',type:'number',def:1},
+        {id:'p_ft_employees',label:'Full-time employees',type:'number',def:0},
+        {id:'p_pt_employees',label:'Part-time / contractors (count as 0.5 each)',type:'number',def:0},
+      ],
+      calc: function(v){return (Number(v.p_founders)||0) + (Number(v.p_ft_employees)||0) + Math.round((Number(v.p_pt_employees)||0)*0.5);}
+    },
+    '1_9': { // Capital Raised
+      title: 'Add up everything you\'ve raised',
+      fields: [
+        {id:'p_self_funded',label:'Personal savings invested ($)',type:'currency',def:0},
+        {id:'p_friends_family',label:'Friends & family ($)',type:'currency',def:0},
+        {id:'p_angel',label:'Angel investors ($)',type:'currency',def:0},
+        {id:'p_grants',label:'Grants / competitions ($)',type:'currency',def:0},
+        {id:'p_institutional',label:'Institutional (VC/fund) ($)',type:'currency',def:0},
+      ],
+      calc: function(v){return (Number(v.p_self_funded)||0)+(Number(v.p_friends_family)||0)+(Number(v.p_angel)||0)+(Number(v.p_grants)||0)+(Number(v.p_institutional)||0);},
+      format:'$'
+    },
+    '1_10': { // Target Raise
+      title: 'What do you need the money for?',
+      fields: [
+        {id:'p_hire',label:'How many people to hire? (avg $85K each)',type:'number',def:2},
+        {id:'p_months_runway',label:'Months of runway needed?',type:'number',def:18},
+        {id:'p_monthly_ops',label:'Monthly ops cost (hosting, tools, office) ($)',type:'currency',def:2000},
+      ],
+      calc: function(v){var hires=(Number(v.p_hire)||0)*85000;var ops=(Number(v.p_months_runway)||0)*(Number(v.p_monthly_ops)||0);return Math.round((hires+ops)/50000)*50000;},
+      format:'$'
+    },
+    '2_14': { // Current MRR
+      title: 'Let\'s calculate your MRR',
+      fields: [
+        {id:'p_paying_customers',label:'How many paying customers right now?',type:'number',def:0},
+        {id:'p_avg_monthly_price',label:'What do they pay per month on average? ($)',type:'currency',def:0},
+      ],
+      calc: function(v){return (Number(v.p_paying_customers)||0)*(Number(v.p_avg_monthly_price)||0);},
+      format:'$'
+    },
+    '2_15': { // Gross Margin
+      title: 'Estimate your gross margin',
+      fields: [
+        {id:'p_monthly_revenue',label:'Monthly revenue (or expected) ($)',type:'currency',def:10000},
+        {id:'p_hosting_costs',label:'Monthly hosting / infrastructure ($)',type:'currency',def:1500},
+        {id:'p_api_costs',label:'Monthly API / AI costs ($)',type:'currency',def:1000},
+        {id:'p_support_costs',label:'Monthly customer support costs ($)',type:'currency',def:500},
+      ],
+      calc: function(v){var rev=Number(v.p_monthly_revenue)||1;var costs=(Number(v.p_hosting_costs)||0)+(Number(v.p_api_costs)||0)+(Number(v.p_support_costs)||0);return Math.round((rev-costs)/rev*100);},
+      suffix:'%'
+    },
+    '2_16': { // MRR Growth Rate
+      title: 'Think about your growth trajectory',
+      fields: [
+        {id:'p_mrr_2mo_ago',label:'MRR two months ago ($)',type:'currency',def:0},
+        {id:'p_mrr_last_mo',label:'MRR last month ($)',type:'currency',def:0},
+        {id:'p_mrr_this_mo',label:'MRR this month ($)',type:'currency',def:0},
+      ],
+      calc: function(v){var a=Number(v.p_mrr_2mo_ago)||0;var b=Number(v.p_mrr_last_mo)||0;var c=Number(v.p_mrr_this_mo)||0;if(a<=0||b<=0||c<=0)return 15;var g1=(b-a)/a*100;var g2=(c-b)/b*100;return Math.round((g1+g2)/2);},
+      suffix:'%',
+      hint:'If pre-revenue, think about how many customers you expect to add per month.'
+    },
+    '2_17': { // Monthly Churn
+      title: 'Estimate your churn',
+      fields: [
+        {id:'p_customers_start',label:'Customers at start of last month',type:'number',def:0},
+        {id:'p_customers_lost',label:'Customers lost / cancelled last month',type:'number',def:0},
+      ],
+      calc: function(v){var s=Number(v.p_customers_start)||1;var l=Number(v.p_customers_lost)||0;return Math.round(l/s*100);},
+      suffix:'%',
+      hint:'No customers yet? Industry average for early SaaS is 5-8%.'
+    },
+    '3_24': { // CAC
+      title: 'Calculate your Customer Acquisition Cost',
+      fields: [
+        {id:'p_marketing_spend',label:'Total marketing + sales spend last 3 months ($)',type:'currency',def:0},
+        {id:'p_new_customers_3mo',label:'New customers acquired in those 3 months',type:'number',def:0},
+      ],
+      calc: function(v){var spend=Number(v.p_marketing_spend)||0;var cust=Number(v.p_new_customers_3mo)||1;if(spend===0&&cust===0)return 200;return Math.round(spend/cust);},
+      format:'$',
+      hint:'No sales data yet? Think about what you\'d spend to get your first 10 customers.'
+    },
+    '3_25': { // ACV
+      title: 'What\'s a customer worth per year?',
+      fields: [
+        {id:'p_monthly_price',label:'Monthly subscription price ($)',type:'currency',def:99},
+        {id:'p_annual_discount',label:'Annual plan discount (%)',type:'number',def:15},
+        {id:'p_pct_annual',label:'What % of customers will choose annual? (%)',type:'number',def:40},
+      ],
+      calc: function(v){var mp=Number(v.p_monthly_price)||99;var disc=Number(v.p_annual_discount)||0;var pctAnn=Number(v.p_pct_annual)||0;var annualPrice=mp*12*(1-disc/100);var monthlyPrice=mp*12;return Math.round((pctAnn/100)*annualPrice+((100-pctAnn)/100)*monthlyPrice);},
+      format:'$'
+    },
+    '4_31': { // Monthly Burn
+      title: 'Add up your monthly expenses',
+      fields: [
+        {id:'p_salaries',label:'Salaries + contractor payments ($)',type:'currency',def:0},
+        {id:'p_rent',label:'Rent / co-working ($)',type:'currency',def:0},
+        {id:'p_hosting2',label:'Hosting + infrastructure ($)',type:'currency',def:500},
+        {id:'p_tools',label:'Software tools + subscriptions ($)',type:'currency',def:200},
+        {id:'p_marketing2',label:'Marketing + ads ($)',type:'currency',def:0},
+        {id:'p_legal_acct',label:'Legal + accounting ($)',type:'currency',def:200},
+        {id:'p_other',label:'Other expenses ($)',type:'currency',def:0},
+      ],
+      calc: function(v){return (Number(v.p_salaries)||0)+(Number(v.p_rent)||0)+(Number(v.p_hosting2)||0)+(Number(v.p_tools)||0)+(Number(v.p_marketing2)||0)+(Number(v.p_legal_acct)||0)+(Number(v.p_other)||0);},
+      format:'$'
+    },
+    '4_32': { // Current Runway
+      title: 'Calculate your runway',
+      fields: [
+        {id:'p_cash_in_bank',label:'Cash in the bank right now ($)',type:'currency',def:0},
+        {id:'p_monthly_burn2',label:'Monthly burn rate ($)',type:'currency',def:15000},
+      ],
+      calc: function(v){var cash=Number(v.p_cash_in_bank)||0;var burn=Number(v.p_monthly_burn2)||1;return Math.round(cash/burn);},
+      suffix:' months'
+    },
+    '4_34': { // Average Salary
+      title: 'What are you paying / planning to pay?',
+      fields: [
+        {id:'p_eng_salary',label:'Engineering salaries (avg) ($)',type:'currency',def:95000},
+        {id:'p_sales_salary',label:'Sales / marketing salaries (avg) ($)',type:'currency',def:75000},
+        {id:'p_ops_salary',label:'Operations / admin salaries (avg) ($)',type:'currency',def:65000},
+        {id:'p_pct_eng',label:'% of hires that will be engineering',type:'number',def:60},
+      ],
+      calc: function(v){var eng=Number(v.p_eng_salary)||95000;var sales=Number(v.p_sales_salary)||75000;var ops=Number(v.p_ops_salary)||65000;var pe=(Number(v.p_pct_eng)||60)/100;var ps=(1-pe)/2;return Math.round(eng*pe+sales*ps+ops*ps);},
+      format:'$'
+    },
+    '5_42': { // Current Valuation
+      title: 'Estimate your valuation',
+      fields: [
+        {id:'p_annual_revenue',label:'Annual revenue (or projected next 12 months) ($)',type:'currency',def:0},
+        {id:'p_revenue_multiple',label:'Revenue multiple for your stage (Idea=20x, Seed=10x, Series A=8x)',type:'number',def:15},
+      ],
+      calc: function(v){var rev=Number(v.p_annual_revenue)||0;var mult=Number(v.p_revenue_multiple)||15;if(rev===0)return 4000000;return Math.round(rev*mult/100000)*100000;},
+      format:'$',
+      hint:'Pre-revenue? Most pre-seed valuations range $2-6M based on team, market, and traction.'
+    },
+  };
+
   // ─── Utilities ───────────────────────────────
   function toast(msg,type){var t=document.createElement('div');t.className='toast toast-'+(type||'success');t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.remove();},3500);}
   function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
@@ -331,6 +472,26 @@
     }
     h+='</div>';
 
+    // Discovery calculator probe
+    var probe=PROBES[key];
+    if(probe){
+      h+='<div style="margin-bottom:0.75rem;"><button class="btn btn-outline btn-sm" id="probeToggle" style="width:100%;justify-content:center;gap:0.5rem;">🧮 Help me figure this out</button>';
+      h+='<div id="probePanel" class="hidden" style="margin-top:0.75rem;padding:1.25rem;border:1px solid var(--pale-clay);border-radius:8px;background:rgba(253,244,226,0.3);">';
+      h+='<h3 style="margin-top:0;font-size:0.95rem;color:var(--deep-black);">'+esc(probe.title)+'</h3>';
+      if(probe.hint)h+='<p style="font-size:0.8rem;color:var(--marsh-olive);margin-bottom:0.75rem;font-style:italic;">'+esc(probe.hint)+'</p>';
+      probe.fields.forEach(function(f){
+        h+='<div style="margin-bottom:0.6rem;"><label class="input-label" style="font-size:0.7rem;">'+esc(f.label)+'</label>';
+        if(f.type==='currency'){
+          h+='<div class="input-currency"><span>$</span><input type="number" class="input probe-field" id="'+f.id+'" value="'+(f.def||0)+'" style="max-width:220px;"></div>';
+        }else{
+          h+='<input type="number" class="input probe-field" id="'+f.id+'" value="'+(f.def||0)+'" style="max-width:180px;">';
+        }
+        h+='</div>';
+      });
+      h+='<div style="display:flex;align-items:center;gap:1rem;margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--pale-clay);"><div><span class="mono text-muted" style="font-size:0.65rem;text-transform:uppercase;">Calculated Answer</span><div id="probeResult" style="font-size:1.5rem;font-weight:700;color:var(--ocher-gold);font-family:\'Barlow Semi Condensed\',sans-serif;">—</div></div><button class="btn btn-gold btn-sm" id="probeUseBtn">Use This Answer</button></div>';
+      h+='</div></div>';
+    }
+
     if(q.def){
       h+='<div class="skip-box"><div><p style="font-size:0.85rem;font-weight:500;margin:0;">Skip this question?</p><p class="mono text-muted" style="margin:0.15rem 0 0;font-size:0.75rem;">Benchmark: <strong>'+esc(q.def)+'</strong>'+(q.defSource?' — '+esc(q.defSource):'')+'</p></div><button class="btn btn-outline btn-sm" id="skipBtn">Use Default</button></div>';
     }
@@ -382,6 +543,37 @@
       else{generateModel();return;}
       renderIntake();
     });}
+
+    // Probe calculator listeners
+    var probeToggle=document.getElementById('probeToggle');
+    if(probeToggle&&probe){
+      probeToggle.addEventListener('click',function(){
+        var panel=document.getElementById('probePanel');
+        if(panel.classList.contains('hidden')){panel.classList.remove('hidden');this.textContent='▲ Close calculator';calcProbe();}
+        else{panel.classList.add('hidden');this.textContent='🧮 Help me figure this out';}
+      });
+      function calcProbe(){
+        var vals={};
+        probe.fields.forEach(function(f){var el=document.getElementById(f.id);if(el)vals[f.id]=el.value;});
+        var result=probe.calc(vals);
+        var display=probe.format==='$'?'$'+Number(result).toLocaleString():result+(probe.suffix||'');
+        var el=document.getElementById('probeResult');if(el)el.textContent=display;
+      }
+      document.querySelectorAll('.probe-field').forEach(function(pf){
+        pf.addEventListener('input',calcProbe);
+      });
+      var probeUseBtn=document.getElementById('probeUseBtn');
+      if(probeUseBtn){probeUseBtn.addEventListener('click',function(){
+        var vals={};
+        probe.fields.forEach(function(f){var el=document.getElementById(f.id);if(el)vals[f.id]=el.value;});
+        var result=probe.calc(vals);
+        var mainInput=document.getElementById('qInput');
+        if(mainInput){mainInput.value=result;saveResponse(key,String(result));}
+        document.getElementById('probePanel').classList.add('hidden');
+        probeToggle.textContent='🧮 Help me figure this out';
+        toast('Answer calculated and saved!','success');
+      });}
+    }
 
     if(inp)inp.focus();
   }
