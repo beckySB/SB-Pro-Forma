@@ -83,15 +83,18 @@ console.log('✓ Database connected:', dbPath);
 // ─── Email ───────────────────────────────────────────────
 let transporter = null;
 try {
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
+  const EMAIL_USER = process.env.EMAIL_USER || 'becky@siliconbayou.ai';
+  const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD || 'ltqnybjdaejcyhca';
+  const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
+  if (EMAIL_USER && EMAIL_PASSWORD) {
     const nodemailer = require('nodemailer');
     transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      host: SMTP_HOST,
       port: 587,
       secure: false,
-      auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASSWORD }
+      auth: { user: EMAIL_USER, pass: EMAIL_PASSWORD }
     });
-    console.log('✓ Email configured:', process.env.EMAIL_USER);
+    console.log('✓ Email configured:', EMAIL_USER);
   } else {
     console.log('⚠ Email not configured');
   }
@@ -515,7 +518,7 @@ async function sendAdminNotification(founder, model) {
   const score = model.finance_score?.score || 0;
   const scoreEmoji = score >= 4 ? '🟢' : score >= 3 ? '🟡' : '🔴';
   await transporter.sendMail({
-    from: process.env.EMAIL_USER,
+    from: EMAIL_USER,
     to: ADMIN_EMAIL,
     subject: `📊 New Pro Forma Generated — ${founder.company_name} (Score: ${score}/5)`,
     html: `
@@ -553,7 +556,7 @@ async function sendFounderConfirmation(founder, model) {
   const siteUrl = process.env.SITE_URL || `http://localhost:${PORT}`;
 
   await transporter.sendMail({
-    from: process.env.EMAIL_USER,
+    from: EMAIL_USER,
     to: founder.email,
     subject: `📊 Your Pro Forma Model is Ready — ${founder.company_name} (Score: ${score}/5)`,
     html: `
@@ -612,7 +615,7 @@ async function sendFollowUp(founder, model) {
   const score = model.finance_score?.score || 0;
 
   await transporter.sendMail({
-    from: process.env.EMAIL_USER,
+    from: EMAIL_USER,
     to: founder.email,
     subject: `🔄 Week 1 Check-In — ${founder.company_name} Pro Forma`,
     html: `
