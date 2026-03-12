@@ -74,6 +74,10 @@ db.exec(`
   );
 `);
 
+// Migrations
+try { db.exec("ALTER TABLE financial_models ADD COLUMN follow_up_sent INTEGER DEFAULT 0"); } catch(e) {}
+try { db.exec("ALTER TABLE financial_models ADD COLUMN confirmation_sent INTEGER DEFAULT 0"); } catch(e) {}
+
 console.log('✓ Database connected:', dbPath);
 
 // ─── Email ───────────────────────────────────────────────
@@ -195,9 +199,10 @@ app.post('/api/generate-model/:founder_id', (req, res) => {
 
     db.prepare('INSERT INTO audit_log (action, detail) VALUES (?, ?)').run('MODEL_GENERATED', `${founder.company_name} (ID:${fid}) — Score: ${model.finance_score?.score || 0}/5`);
 
-    // Notify admin
+    // Notify admin + send confirmation to founder
     if (transporter) {
-      sendAdminNotification(founder, model).catch(e => console.error('Email error:', e.message));
+      sendAdminNotification(founder, model).catch(e => console.error('Admin email error:', e.message));
+      sendFounderConfirmation(founder, model).catch(e => console.error('Confirmation email error:', e.message));
     }
 
     res.json({ success: true, model });
@@ -515,12 +520,12 @@ async function sendAdminNotification(founder, model) {
     subject: `📊 New Pro Forma Generated — ${founder.company_name} (Score: ${score}/5)`,
     html: `
       <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;color:#333;">
-        <div style="background:linear-gradient(135deg,#1B365D,#2A5A8C);padding:1.5rem;text-align:center;border-radius:8px 8px 0 0;">
-          <h2 style="color:#fff;margin:0;font-weight:300;">New Pro Forma Model</h2>
-          <p style="color:#C9A96E;margin-top:0.25rem;font-weight:600;">Silicon Bayou Holdings</p>
+        <div style="background:#130702;padding:1.5rem;text-align:center;border-radius:8px 8px 0 0;">
+          <h2 style="color:#FDF4E2;margin:0;font-weight:300;">New Pro Forma Model</h2>
+          <p style="color:#B58A4B;margin-top:0.25rem;font-weight:600;">Silicon Bayou Holdings</p>
         </div>
-        <div style="padding:1.5rem;background:#fff;border:1px solid #e5e5e5;">
-          <h3 style="color:#1B365D;margin-top:0;">${founder.company_name}</h3>
+        <div style="padding:1.5rem;background:#fff;border:1px solid #C9B9A6;">
+          <h3 style="color:#130702;margin-top:0;">${founder.company_name}</h3>
           <table style="width:100%;font-size:0.9rem;border-collapse:collapse;">
             <tr><td style="padding:6px 0;color:#888;">Founder</td><td style="font-weight:600;">${founder.name} (${founder.email})</td></tr>
             <tr><td style="padding:6px 0;color:#888;">Phase</td><td style="font-weight:600;">${founder.phase}</td></tr>
@@ -535,6 +540,147 @@ async function sendAdminNotification(founder, model) {
   });
   console.log('✓ Admin notification sent');
 }
+
+// ─── Founder Confirmation Email ──────────────────────────
+async function sendFounderConfirmation(founder, model) {
+  if (!transporter) return;
+  const score = model.finance_score?.score || 0;
+  const scoreLabel = model.finance_score?.label || '';
+  const gatesPassed = model.finance_score?.gates_passed?.length || 0;
+  const totalGates = model.finance_score?.total_gates || 7;
+  const y5Rev = model.five_year_pnl?.[4]?.revenue || 0;
+  const breakEven = model.funding_summary?.break_even_year;
+  const siteUrl = process.env.SITE_URL || `http://localhost:${PORT}`;
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: founder.email,
+    subject: `📊 Your Pro Forma Model is Ready — ${founder.company_name} (Score: ${score}/5)`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;color:#333;">
+        <div style="background:#130702;padding:1.5rem;text-align:center;border-radius:8px 8px 0 0;">
+          <h2 style="color:#FDF4E2;margin:0;font-weight:300;">Your Financial Model is Ready</h2>
+          <p style="color:#B58A4B;margin-top:0.25rem;font-weight:600;">Silicon Bayou Holdings · AI SaaS Pro Forma</p>
+        </div>
+        <div style="padding:1.5rem;background:#fff;border:1px solid #C9B9A6;">
+          <p>Hi ${founder.name},</p>
+          <p>Your 5-year financial model for <strong>${founder.company_name}</strong> has been generated. Here's your snapshot:</p>
+
+          <div style="background:#FDF4E2;border-radius:8px;padding:1rem;margin:1rem 0;text-align:center;">
+            <div style="font-size:2rem;font-weight:700;color:${score >= 4 ? '#4F5B45' : score >= 3 ? '#B58A4B' : '#9C4F38'};">${score}/5</div>
+            <div style="font-size:0.85rem;color:#676C5C;">Finance Score — ${scoreLabel}</div>
+            <div style="font-size:0.75rem;color:#959685;margin-top:0.25rem;">${gatesPassed}/${totalGates} quality gates passed</div>
+          </div>
+
+          <table style="width:100%;font-size:0.9rem;border-collapse:collapse;">
+            <tr><td style="padding:6px 0;color:#7D8C96;">Phase</td><td style="font-weight:600;">${founder.phase}</td></tr>
+            <tr><td style="padding:6px 0;color:#7D8C96;">Vertical</td><td>${founder.vertical}</td></tr>
+            <tr><td style="padding:6px 0;color:#7D8C96;">Year 5 Revenue</td><td style="font-weight:600;">$${y5Rev.toLocaleString()}</td></tr>
+            <tr><td style="padding:6px 0;color:#7D8C96;">Break-Even</td><td>${breakEven ? 'Year ' + breakEven : 'Beyond Year 5'}</td></tr>
+          </table>
+
+          <div style="text-align:center;margin:1.5rem 0;">
+            <a href="${siteUrl}/#report/${encodeURIComponent(founder.email)}" style="display:inline-block;background:#130702;color:#FDF4E2;padding:12px 32px;border-radius:6px;text-decoration:none;font-weight:600;">View Your Full Dashboard →</a>
+          </div>
+
+          <h3 style="color:#130702;margin-top:1.5rem;">What's Next?</h3>
+          <ol style="font-size:0.9rem;line-height:1.8;">
+            <li><strong>Review your dashboard</strong> — P&L, unit economics, cash runway, headcount</li>
+            <li><strong>Refine your inputs</strong> — update any questions to re-generate</li>
+            <li><strong>Share with the SBH team</strong> — we'll help optimize your model</li>
+          </ol>
+
+          <div style="background:#FDF4E2;border-left:3px solid #B58A4B;padding:1rem;border-radius:0 6px 6px 0;margin:1.5rem 0;">
+            <p style="margin:0;font-weight:600;color:#130702;">💡 Ready to build your fundraise strategy?</p>
+            <p style="margin:0.25rem 0 0;font-size:0.85rem;">Connect with Silicon Bayou Holdings for hands-on guidance, pitch prep, and investor introductions.</p>
+            <p style="margin:0.5rem 0 0;"><a href="https://siliconbayou.ai" style="color:#B58A4B;font-weight:600;">Schedule a call with SBH →</a></p>
+          </div>
+        </div>
+        <div style="text-align:center;padding:1rem;color:#959685;font-size:0.75rem;">
+          Silicon Bayou Holdings · Confidential & Proprietary<br>
+          <em>Laissez les bons temps coder!</em>
+        </div>
+      </div>`
+  });
+  console.log(`✓ Confirmation email sent to ${founder.email}`);
+}
+
+// ─── 7-Day Follow-Up Email ───────────────────────────────
+async function sendFollowUp(founder, model) {
+  if (!transporter) return;
+  const siteUrl = process.env.SITE_URL || `http://localhost:${PORT}`;
+  const score = model.finance_score?.score || 0;
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: founder.email,
+    subject: `🔄 Week 1 Check-In — ${founder.company_name} Pro Forma`,
+    html: `
+      <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;color:#333;">
+        <div style="background:#130702;padding:1.5rem;text-align:center;border-radius:8px 8px 0 0;">
+          <h2 style="color:#FDF4E2;margin:0;">Week 1 Check-In</h2>
+          <p style="color:#B58A4B;margin-top:0.25rem;">Silicon Bayou Holdings</p>
+        </div>
+        <div style="padding:1.5rem;background:#fff;border:1px solid #C9B9A6;">
+          <p>Hi ${founder.name},</p>
+          <p>It's been a week since you generated your pro forma model for <strong>${founder.company_name}</strong>. Your Finance Score was <strong>${score}/5</strong>.</p>
+
+          <h3 style="color:#130702;">Three things to consider this week:</h3>
+          <ol style="font-size:0.9rem;line-height:1.8;">
+            <li><strong>Revisit your assumptions</strong> — Has anything changed since you submitted? Update your inputs and re-generate for a refined model.</li>
+            <li><strong>Validate with your market</strong> — Share your unit economics with potential customers or advisors. Does the pricing hold up?</li>
+            <li><strong>Start your pitch deck</strong> — Your pro forma gives you the numbers. Now wrap the narrative around them.</li>
+          </ol>
+
+          <div style="text-align:center;margin:1.5rem 0;">
+            <a href="${siteUrl}/#report/${encodeURIComponent(founder.email)}" style="display:inline-block;background:#130702;color:#FDF4E2;padding:12px 32px;border-radius:6px;text-decoration:none;font-weight:600;">View Your Dashboard →</a>
+          </div>
+
+          <div style="background:#FDF4E2;border-left:3px solid #B58A4B;padding:1rem;border-radius:0 6px 6px 0;margin:1.5rem 0;">
+            <p style="margin:0;font-weight:600;color:#130702;">Ready to move faster?</p>
+            <p style="margin:0.25rem 0 0;font-size:0.85rem;">SBH offers hands-on support for AI SaaS founders — from financial modeling to investor introductions.</p>
+            <p style="margin:0.5rem 0 0;"><a href="https://siliconbayou.ai" style="color:#B58A4B;font-weight:600;">Connect with SBH →</a></p>
+          </div>
+        </div>
+        <div style="text-align:center;padding:1rem;color:#959685;font-size:0.75rem;">
+          Silicon Bayou Holdings · <em>Laissez les bons temps coder!</em>
+        </div>
+      </div>`
+  });
+  console.log(`✓ Follow-up email sent to ${founder.email}`);
+}
+
+// ─── Follow-Up Scheduler (hourly check) ──────────────────
+setInterval(async () => {
+  try {
+    // Add column if missing (migration)
+    try { db.exec("ALTER TABLE financial_models ADD COLUMN follow_up_sent INTEGER DEFAULT 0"); } catch(e) {}
+    try { db.exec("ALTER TABLE financial_models ADD COLUMN confirmation_sent INTEGER DEFAULT 0"); } catch(e) {}
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const pending = db.prepare(`
+      SELECT fm.id as model_id, fm.model_json, f.email, f.name, f.company_name, f.phase, f.vertical
+      FROM financial_models fm
+      JOIN founders f ON fm.founder_id = f.id
+      WHERE fm.follow_up_sent = 0 AND fm.generated_at <= ?
+      ORDER BY fm.generated_at ASC LIMIT 5
+    `).all(sevenDaysAgo);
+
+    for (const row of pending) {
+      try {
+        const model = JSON.parse(row.model_json);
+        await sendFollowUp({ email: row.email, name: row.name, company_name: row.company_name }, model);
+        db.prepare("UPDATE financial_models SET follow_up_sent = 1 WHERE id = ?").run(row.model_id);
+        db.prepare("INSERT INTO audit_log (action, detail) VALUES (?, ?)").run('follow_up_sent', `${row.email} — ${row.company_name}`);
+      } catch (e) {
+        console.error('Follow-up email error:', row.email, e.message);
+      }
+    }
+    if (pending.length) console.log(`✓ Processed ${pending.length} follow-up emails`);
+  } catch (e) {
+    console.error('Follow-up scheduler error:', e.message);
+  }
+}, 60 * 60 * 1000); // Every hour
 
 // ─── SPA Routes ──────────────────────────────────────────
 app.get('*', (req, res) => {
