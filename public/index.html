@@ -193,41 +193,66 @@
       {q:9,label:'Capital Raised',plain:'How much total capital has your company raised?',why:'Validates phase classification.',affects:'Funding tab, investor return analysis.',type:'currency',def:'$0',defSource:'Idea-stage default',required:true},
       {q:10,label:'Target Raise Amount',plain:'How much are you looking to raise next?',why:'Critical for funding timeline and investor return model.',affects:'Funding tab, runway, "The Ask" in memos.',type:'currency',def:'$500,000',defSource:'Pre-Seed median (PitchBook 2024)',required:true},
     ]},
-    { num:2, title:'Product & Revenue Model', desc:'How your product generates revenue. This builds the revenue engine.', time:8, questions:[
+    { num:2, title:'Product & Revenue Model', desc:'How your product generates revenue. This builds the revenue engine.', time:12, questions:[
       {q:11,label:'Revenue Model',plain:'How does your company make money?',why:'Determines revenue model structure.',affects:'Revenue tab, MRR/ARR calculations.',type:'select',options:['SaaS Subscription','Usage-Based','Marketplace / Transaction Fee','Licensing','Freemium + Premium','Hybrid','Services + Software'],def:'SaaS Subscription',defSource:'Most common (OpenView 2024)',required:true},
       {q:12,label:'Pricing Tiers',plain:'Describe your pricing tiers and monthly prices.',why:'Used to project revenue per segment.',affects:'Revenue model pricing, ACV calculation.',type:'textarea',def:'Basic: $29/mo, Pro: $99/mo, Enterprise: $299/mo',defSource:'Bessemer 2024',required:true,charLimit:300},
       {q:13,label:'Contract Terms',plain:'What are your typical contract lengths?',why:'Affects revenue recognition and cash flow timing.',affects:'Churn calculations, cash flow projections.',type:'select',options:['Month-to-Month','Annual Contracts','Monthly with Annual Discount','Multi-Year Contracts','Mix of Monthly and Annual'],def:'Monthly with Annual Discount',defSource:'SaaStr benchmarks',required:true},
-      {q:14,label:'Current MRR',plain:'What is your current Monthly Recurring Revenue?',why:'Starting point for revenue projections.',affects:'Revenue model Year 1.',type:'currency',def:'$0',defSource:'Pre-revenue default',required:true},
-      {q:15,label:'Target Gross Margin',plain:'What gross margin do you expect?',why:'Critical SaaS metric for profitability.',affects:'P&L gross margin, quality gate.',type:'number',def:'70',defSource:'Bessemer median (2024)',required:true},
-      {q:16,label:'MRR Growth Rate',plain:'What monthly MRR growth rate are you targeting?',why:'Drives the revenue growth curve.',affects:'5-year revenue projections.',type:'number',def:'15',defSource:'SaaStr top-quartile (2024)',required:true},
-      {q:17,label:'Monthly Churn Rate',plain:'What % of customers cancel each month?',why:'Churn is the #1 SaaS killer.',affects:'Customer retention, NRR, LTV.',type:'number',def:'5',defSource:'OpenView median (2024)',required:true},
-      {q:18,label:'Net Revenue Retention',plain:'What is your NRR? (expansion − contraction − churn)',why:'Shows if existing customers grow in value.',affects:'Revenue waterfall, cohort analysis.',type:'number',def:'100',defSource:'Bessemer (2024)'},
-      {q:19,label:'Time to First Revenue',plain:'Months until first revenue? (0 if already generating)',why:'Determines when revenue starts in model.',affects:'Revenue start date, runway.',type:'number',def:'6',defSource:'Pre-Seed median (CB Insights)',required:true},
-      {q:20,label:'AI Infrastructure Cost %',plain:'What % of revenue goes to AI/ML infrastructure?',why:'AI SaaS has unique cost structures.',affects:'COGS, gross margin calculations.',type:'number',def:'20',defSource:'a16z AI SaaS benchmarks (2024)',required:true},
+      {q:14,label:'Current MRR',plain:'What is your current Monthly Recurring Revenue?',why:'Starting point for revenue projections. If $0, the next questions build your customer ramp.',affects:'Revenue model Year 1.',type:'currency',def:'$0',defSource:'Pre-revenue default',required:true},
+      {q:56,label:'First Paying Customers',plain:'How many paying customers do you expect in your first 6 months of revenue?',why:'15% growth on $0 is still $0. We need to know when real customers start arriving to build an accurate revenue ramp.',affects:'Revenue ramp months 1-6. This is the seed that compounds.',type:'number',def:'5',defSource:'Typical B2B SaaS first 6 months',required:true},
+      {q:57,label:'Customers by End of Year 1',plain:'How many paying customers do you expect by the end of Year 1?',why:'This sets the slope of your customer acquisition curve. Combined with pricing, it builds your Year 1 revenue.',affects:'Year 1 ARR, growth trajectory, sales capacity planning.',type:'number',def:'25',defSource:'Pre-Seed SaaS median (SaaStr)',required:true},
+      {q:58,label:'Customers by End of Year 2',plain:'How many paying customers do you expect by end of Year 2?',why:'Year 2 shows whether your GTM is scaling. The jump from Year 1 to Year 2 is what investors scrutinize.',affects:'Year 2 revenue, growth rate, hiring needs.',type:'number',def:'100',defSource:'Seed-stage SaaS target',required:true},
+      {q:59,label:'Average Revenue Per Customer',plain:'What will an average customer pay you per month?',why:'Not all customers buy the same tier. This blended average × customer count = your MRR at each stage.',affects:'MRR calculations, ACV, revenue projections.',type:'currency',def:'$99',defSource:'B2B SaaS median price point',required:true},
+      {q:60,label:'Revenue Concentration Risk',plain:'Will any single customer represent more than 20% of revenue in Year 1?',why:'High customer concentration is a risk factor. If you lose that customer, what happens?',affects:'Risk assessment, revenue diversification score.',type:'select',options:['No — well diversified','Yes — 1 anchor customer expected','Yes — 2-3 large customers','Unsure'],def:'No — well diversified',defSource:'Ideal scenario'},
+      {q:15,label:'Target Gross Margin',plain:'What gross margin do you expect?',why:'Critical SaaS metric for profitability. Gross margin = (Revenue − direct costs) / Revenue.',affects:'P&L gross margin, quality gate.',type:'number',def:'70',defSource:'Bessemer median (2024)',required:true},
+      {q:16,label:'MRR Growth Rate (After First Customers)',plain:'Once you have paying customers, what monthly growth rate do you expect?',why:'This applies AFTER your first customers arrive. A 15% monthly rate means doubling every ~5 months.',affects:'5-year revenue projections (compounds on your actual customer base, not $0).',type:'number',def:'15',defSource:'SaaStr top-quartile (2024)',required:true},
+      {q:17,label:'Monthly Churn Rate',plain:'What % of customers cancel each month?',why:'Churn is the #1 SaaS killer. Even 5% monthly churn means you lose ~46% of customers per year.',affects:'Customer retention, NRR, LTV.',type:'number',def:'5',defSource:'OpenView median (2024)',required:true},
+      {q:18,label:'Net Revenue Retention',plain:'What is your NRR? (expansion − contraction − churn)',why:'Shows if existing customers grow in value. NRR above 100% means customers spend more over time.',affects:'Revenue waterfall, cohort analysis.',type:'number',def:'100',defSource:'Bessemer (2024)'},
+      {q:19,label:'Time to First Revenue',plain:'How many months from now until your first paying customer?',why:'This is when the revenue ramp begins. Everything before this is $0 revenue.',affects:'Revenue start date, pre-revenue burn, runway.',type:'number',def:'6',defSource:'Pre-Seed median (CB Insights)',required:true},
+      {q:20,label:'AI Infrastructure Cost %',plain:'What % of revenue goes to AI/ML infrastructure?',why:'AI SaaS has unique cost structures. OpenAI/Anthropic API costs can eat margins fast.',affects:'COGS, gross margin calculations.',type:'number',def:'20',defSource:'a16z AI SaaS benchmarks (2024)',required:true},
     ]},
-    { num:3, title:'Market & Go-to-Market', desc:'Your market opportunity and customer acquisition strategy.', time:7, questions:[
-      {q:21,label:'Total Addressable Market',plain:'How big is the total market?',why:'TAM frames opportunity size for investors.',affects:'Market section in memos.',type:'text',def:'$1B+',defSource:'Min VC-backable TAM',required:true},
-      {q:22,label:'GTM Motion',plain:'How do you primarily acquire customers?',why:'Determines cost structure and sales efficiency.',affects:'CAC calculations, GTM section.',type:'select',options:['Product-Led Growth','Inside Sales','Field Sales / Enterprise','Channel / Partnerships','PLG + Sales Assist','Marketing-Led / Inbound','Outbound Sales'],def:'Product-Led Growth',defSource:'Most common AI SaaS (OpenView 2024)',required:true},
-      {q:23,label:'Sales Cycle Length',plain:'How long does it take to close a deal?',why:'Affects cash flow timing.',affects:'Cash flow projections, sales capacity.',type:'select',options:['< 14 days (self-serve)','14-30 days','30-60 days','60-90 days','90-180 days','180+ days (enterprise)'],def:'14-30 days',defSource:'SaaStr SMB benchmark',required:true},
-      {q:24,label:'Customer Acquisition Cost',plain:'How much does it cost to acquire one customer?',why:'Key unit economics metric investors scrutinize.',affects:'Unit economics, LTV/CAC ratio.',type:'currency',def:'$200',defSource:'OpenView SMB median (2024)',required:true},
-      {q:25,label:'Average Contract Value',plain:'Annual value of a customer contract?',why:'Used to calculate revenue per customer.',affects:'Revenue model, ARPU.',type:'currency',def:'$3,600',defSource:'$99/mo × 12',required:true},
-      {q:26,label:'LTV/CAC Ratio',plain:'What is your Lifetime Value to CAC ratio?',why:'The #1 unit economics metric.',affects:'Quality gate: Unit Economics Viability.',type:'number',def:'3',defSource:'Bessemer minimum viable (2024)',required:true},
-      {q:27,label:'CAC Payback Period',plain:'Months until a customer pays back their acquisition cost?',why:'Measures capital efficiency.',affects:'Cash flow model.',type:'number',def:'18',defSource:'SaaStr median (2024)'},
-      {q:28,label:'First GTM Hire',plain:'When will you make first dedicated sales/marketing hire?',why:'Impacts headcount planning.',affects:'S&M expense, hiring plan.',type:'text',def:'Month 6-9'},
-      {q:29,label:'Ideal Customer Profile',plain:'Describe your ideal customer in 1-2 sentences.',why:'Shapes GTM strategy.',affects:'Memo: GTM Strategy.',type:'textarea',required:true,charLimit:300},
-      {q:30,label:'Key Differentiation',plain:'What makes your product uniquely better?',why:'Defines competitive moat.',affects:'Memo: Competitive Landscape.',type:'textarea',required:true,charLimit:400},
+    { num:3, title:'Market & Go-to-Market', desc:'Your market opportunity, customer acquisition strategy, and sales infrastructure.', time:10, questions:[
+      {q:21,label:'Total Addressable Market',plain:'How big is the total market?',why:'TAM frames opportunity size for investors. Think: if every possible buyer purchased, what\'s the annual spend?',affects:'Market section in memos.',type:'text',def:'$1B+',defSource:'Min VC-backable TAM',required:true},
+      {q:22,label:'GTM Motion',plain:'How do you primarily acquire customers?',why:'Determines cost structure and sales efficiency. PLG is cheap but slow; enterprise sales is expensive but high ACV.',affects:'CAC calculations, GTM section, hiring plan.',type:'select',options:['Product-Led Growth','Inside Sales','Field Sales / Enterprise','Channel / Partnerships','PLG + Sales Assist','Marketing-Led / Inbound','Outbound Sales'],def:'Product-Led Growth',defSource:'Most common AI SaaS (OpenView 2024)',required:true},
+      {q:61,label:'Marketing Channels',plain:'Which marketing channels will you invest in? (Select all that apply)',why:'Different channels have wildly different costs and timelines. Content marketing takes 6+ months; paid ads are immediate but expensive.',affects:'Marketing budget allocation, CAC by channel.',type:'textarea',def:'Content/SEO, LinkedIn, Product Hunt launch',defSource:'Early-stage B2B SaaS playbook',required:true,charLimit:400},
+      {q:62,label:'Monthly Marketing Budget',plain:'How much will you spend on marketing per month?',why:'Marketing spend directly drives customer acquisition. Too low = slow growth. Too high = short runway.',affects:'S&M expense line, CAC calculation, burn rate.',type:'currency',def:'$2,000',defSource:'Pre-Seed median',required:true},
+      {q:63,label:'Conversion Rate',plain:'What % of leads/trials will convert to paying customers?',why:'Free trial → paid conversion is typically 2-5% for PLG, 15-25% for sales-assisted. This determines how many leads you need.',affects:'Lead generation targets, marketing spend efficiency.',type:'number',def:'3',defSource:'PLG median (OpenView 2024)',required:true},
+      {q:64,label:'Sales Team Plan',plain:'When and how will you build a sales function?',why:'Founder-led sales works for first 10-20 customers. After that, you need dedicated salespeople. Each rep costs $80-120K+ loaded.',affects:'Headcount plan, S&M expense, revenue capacity.',type:'select',options:['Founder-led only (Year 1)','First SDR by month 6','First AE by month 9','Sales team from day 1','No sales team — pure PLG','Outsourced / agency'],def:'Founder-led only (Year 1)',defSource:'Standard for pre-seed'},
+      {q:23,label:'Sales Cycle Length',plain:'How long does it take from first contact to signed deal?',why:'A 90-day cycle means revenue is delayed 3 months from when you spend on marketing. This creates cash flow gaps.',affects:'Cash flow projections, sales capacity, pipeline forecasting.',type:'select',options:['< 14 days (self-serve)','14-30 days','30-60 days','60-90 days','90-180 days','180+ days (enterprise)'],def:'14-30 days',defSource:'SaaStr SMB benchmark',required:true},
+      {q:24,label:'Customer Acquisition Cost',plain:'How much does it cost to acquire one customer?',why:'Total sales + marketing spend ÷ new customers. Include founder time, ads, tools, events, content creation.',affects:'Unit economics, LTV/CAC ratio, burn rate.',type:'currency',def:'$200',defSource:'OpenView SMB median (2024)',required:true},
+      {q:25,label:'Average Contract Value',plain:'Annual value of a customer contract?',why:'ACV × customer count = ARR. Higher ACV means fewer customers needed but usually longer sales cycles.',affects:'Revenue model, ARPU, sales capacity planning.',type:'currency',def:'$3,600',defSource:'$99/mo × 12',required:true},
+      {q:65,label:'Upsell / Expansion Strategy',plain:'How will you grow revenue from existing customers?',why:'It costs 5-7x more to acquire a new customer than to expand an existing one. Expansion revenue is the #1 driver of NRR above 100%.',affects:'NRR, revenue retention, Year 2-5 growth.',type:'select',options:['Usage-based expansion (pay more as they use more)','Tier upgrades (Basic → Pro → Enterprise)','Seat-based expansion (add more users)','Add-on products / modules','Annual price increases','No expansion strategy yet'],def:'Tier upgrades (Basic → Pro → Enterprise)',defSource:'Most common SaaS expansion'},
+      {q:26,label:'LTV/CAC Ratio',plain:'What is your Lifetime Value to CAC ratio?',why:'LTV = (ARPU × Gross Margin) ÷ Churn. If LTV/CAC < 1, you lose money on every customer. 3:1 is the minimum healthy ratio.',affects:'Quality gate: Unit Economics Viability.',type:'number',def:'3',defSource:'Bessemer minimum viable (2024)',required:true},
+      {q:27,label:'CAC Payback Period',plain:'Months until a customer pays back their acquisition cost?',why:'If CAC payback is 18 months, you need 18 months of runway PER customer before they become profitable.',affects:'Cash flow model, funding needs.',type:'number',def:'18',defSource:'SaaStr median (2024)'},
+      {q:28,label:'First GTM Hire',plain:'When will you make your first dedicated sales or marketing hire?',why:'Each month delay is slower growth; each month early is higher burn. Timing this hire is critical.',affects:'S&M expense, hiring plan, burn rate.',type:'text',def:'Month 6-9'},
+      {q:29,label:'Ideal Customer Profile',plain:'Describe your ideal customer: industry, company size, title of buyer, budget range.',why:'A specific ICP means focused marketing spend. "Everyone" as a target means wasted dollars.',affects:'Memo: GTM Strategy, marketing channel selection.',type:'textarea',required:true,charLimit:400},
+      {q:30,label:'Key Differentiation',plain:'What makes your product uniquely better than alternatives? Why would someone switch?',why:'Defines competitive moat. If you can\'t articulate this clearly, neither can your customers.',affects:'Memo: Competitive Landscape, pricing power.',type:'textarea',required:true,charLimit:400},
+      {q:66,label:'Competitive Landscape',plain:'Who are your top 3 competitors and how are you different?',why:'Investors will ask this. Knowing your competitors shows market awareness and helps define positioning.',affects:'Competitive analysis, pricing strategy, differentiation.',type:'textarea',def:'No direct competitors identified',charLimit:500},
     ]},
-    { num:4, title:'Operations & Cost Structure', desc:'Your expenses, burn rate, and operational costs drive runway calculations.', time:7, questions:[
-      {q:31,label:'Monthly Burn Rate',plain:'How much does your company spend per month?',why:'Determines runway and cash flow.',affects:'Cash flow tab, runway.',type:'currency',def:'$15,000',defSource:'Pre-Seed median (BLS 2024)',required:true},
-      {q:32,label:'Current Runway',plain:'How many months can you operate at current burn?',why:'Urgency indicator for fundraising.',affects:'Cash flow, funding timeline.',type:'number',def:'12',defSource:'Target runway',required:true},
-      {q:33,label:'Hiring Plan',plain:'How many people will you hire next year?',why:'Headcount is typically largest SaaS expense.',affects:'Headcount tab, expense projections.',type:'number',def:'3',defSource:'Pre-Seed typical',required:true},
-      {q:34,label:'Average Salary',plain:'Average annual salary you plan to pay?',why:'Largest expense line item.',affects:'Headcount salary calculations.',type:'currency',def:'$85,000',defSource:'BLS SaaS median (2024)',required:true},
-      {q:35,label:'Benefits Burden Rate',plain:'What % on top of salary for benefits/taxes?',why:'True cost exceeds base salary.',affects:'Total compensation calculations.',type:'number',def:'25',defSource:'Standard US rate'},
-      {q:36,label:'Monthly Hosting',plain:'Monthly cloud hosting and infrastructure cost?',why:'Key cost for AI SaaS companies.',affects:'COGS, infrastructure costs.',type:'currency',def:'$1,000',defSource:'Early-stage median',required:true},
-      {q:37,label:'Monthly Tools & Software',plain:'Monthly SaaS tools spend? (Slack, GitHub, etc.)',why:'G&A line item.',affects:'G&A expense.',type:'currency',def:'$300',defSource:'Early-stage median'},
-      {q:38,label:'Workspace Costs',plain:'Monthly office/co-working cost? ($0 if remote)',why:'Fixed cost affecting burn rate.',affects:'G&A expense.',type:'currency',def:'$0',defSource:'Remote-first default'},
-      {q:39,label:'Hardware & Equipment',plain:'Estimated annual hardware costs?',why:'Capital expenditure.',affects:'G&A expense.',type:'currency',def:'$2,000'},
-      {q:40,label:'Legal & Compliance',plain:'Estimated annual legal costs?',why:'Often underestimated. Important for accuracy.',affects:'G&A expense.',type:'currency',def:'$5,000'},
+    { num:4, title:'Operations & Cost Structure', desc:'Your expenses, team, infrastructure, and operational costs. This is where most founders underestimate.', time:12, questions:[
+      {q:31,label:'Monthly Burn Rate',plain:'How much does your company spend per month right now?',why:'This is your current spend, not projected. We\'ll build projected costs from the detailed questions below.',affects:'Cash flow tab, current runway calculation.',type:'currency',def:'$15,000',defSource:'Pre-Seed median (BLS 2024)',required:true},
+      {q:32,label:'Current Runway',plain:'How many months can you operate at current burn?',why:'Under 6 months means urgent fundraising. 12-18 months is ideal.',affects:'Cash flow, funding timeline, urgency.',type:'number',def:'12',defSource:'Target runway',required:true},
+      {q:67,label:'Founder Salaries',plain:'What annual salary are founders taking? ($0 if unpaid)',why:'Many founders take $0 early on, but that\'s not sustainable. Investors want to know the real cost when founders start drawing salary.',affects:'Year 1-2 expense projections, true burn rate.',type:'currency',def:'$0',defSource:'Common for pre-seed founders',required:true},
+      {q:68,label:'When Do Founders Start Drawing Salary?',plain:'At what month will founders start taking a salary (or increase current salary)?',why:'This is a step-function cost increase that many pro formas miss. Going from $0 to $80K/founder changes burn dramatically.',affects:'Monthly burn rate timeline, cash flow projections.',type:'select',options:['Already drawing full salary','After seed round closes','Month 6','Month 12','Month 18','After first $10K MRR','After profitability'],def:'After seed round closes',defSource:'Most common approach'},
+      {q:69,label:'Target Founder Salary',plain:'What salary will founders draw once they start?',why:'Combined with timing, this shows when your real burn rate kicks in.',affects:'Executive compensation, burn rate after funding.',type:'currency',def:'$80,000',defSource:'Pre-Seed founder median (Kruze Consulting 2024)'},
+      {q:33,label:'Engineering Hires (Year 1)',plain:'How many engineers will you hire in Year 1?',why:'Engineers are typically 60-70% of early headcount. Each one is $95-150K loaded cost.',affects:'Headcount tab, R&D expense, burn rate.',type:'number',def:'2',defSource:'Pre-Seed typical',required:true},
+      {q:70,label:'Engineering Hires (Year 2)',plain:'How many additional engineers in Year 2?',why:'Year 2 scaling usually requires 2-3x the engineering team to handle growth, technical debt, and new features.',affects:'Year 2 headcount, R&D scaling costs.',type:'number',def:'3',defSource:'Post-Seed typical'},
+      {q:71,label:'Non-Engineering Hires (Year 1)',plain:'How many non-engineering hires in Year 1? (Sales, marketing, ops, support)',why:'Support + ops needs scale with customers. Each non-eng hire is $65-100K loaded.',affects:'G&A and S&M expense, support capacity.',type:'number',def:'1',defSource:'Pre-Seed typical'},
+      {q:72,label:'Non-Engineering Hires (Year 2)',plain:'How many additional non-engineering hires in Year 2?',why:'As customer count grows, you need support, account management, and sales capacity.',affects:'Year 2 headcount, scaling readiness.',type:'number',def:'3',defSource:'Post-Seed typical'},
+      {q:34,label:'Average Engineering Salary',plain:'Average annual salary for engineering hires?',why:'Include base salary only. Benefits are calculated separately.',affects:'R&D expense line, loaded cost per engineer.',type:'currency',def:'$95,000',defSource:'BLS Software Dev median (2024)',required:true},
+      {q:73,label:'Average Non-Engineering Salary',plain:'Average annual salary for sales/ops/support hires?',why:'Non-engineering roles are typically 20-30% lower than engineering.',affects:'G&A and S&M expense lines.',type:'currency',def:'$70,000',defSource:'BLS median (2024)'},
+      {q:35,label:'Benefits Burden Rate',plain:'What % on top of salary for benefits/taxes? (FICA, health insurance, 401k, etc.)',why:'Real cost per employee = salary × (1 + burden rate). A $95K engineer actually costs $119K at 25% burden.',affects:'Total compensation calculations, true burn rate.',type:'number',def:'25',defSource:'Standard US rate'},
+      {q:74,label:'Contractor / Freelancer Budget',plain:'Monthly budget for contractors and freelancers?',why:'Many startups use contractors before full-time hires. This is real spend that often gets missed.',affects:'Monthly burn rate, COGS or G&A depending on role.',type:'currency',def:'$2,000',defSource:'Early-stage typical'},
+      {q:36,label:'Cloud Compute & Hosting',plain:'Monthly cloud hosting cost? (AWS, GCP, Azure)',why:'For AI SaaS, this scales with usage. $500/mo at launch can become $5,000/mo with 100 customers.',affects:'COGS, infrastructure costs.',type:'currency',def:'$500',defSource:'Early-stage AWS median',required:true},
+      {q:75,label:'AI/ML API Costs',plain:'Monthly AI API costs? (OpenAI, Anthropic, Cohere, etc.)',why:'AI inference costs are the #1 margin killer for AI SaaS. $0.01/call × 1M calls = $10K/month.',affects:'COGS, gross margin, AI cost scaling.',type:'currency',def:'$300',defSource:'Early-stage AI SaaS median',required:true},
+      {q:76,label:'Hosting Cost Growth',plain:'How will hosting costs scale with customers?',why:'Linear scaling (2x customers = 2x cost) is bad. Sub-linear scaling (2x customers = 1.3x cost) is good.',affects:'Year 2-5 COGS projections.',type:'select',options:['Linear — scales 1:1 with customers','Sub-linear — efficiency gains with scale','Step-function — jumps at thresholds (e.g., new server tiers)','Fixed — flat cost regardless of usage','Unsure'],def:'Sub-linear — efficiency gains with scale',defSource:'Well-architected SaaS'},
+      {q:77,label:'Database & Storage',plain:'Monthly database and data storage costs?',why:'Separate from compute. Includes managed databases (RDS, Planetscale), data lakes, backups.',affects:'COGS, infrastructure.',type:'currency',def:'$100',defSource:'Early-stage typical'},
+      {q:37,label:'Monthly Tools & Software',plain:'Monthly SaaS tools spend? (Slack, GitHub, Figma, monitoring, analytics, etc.)',why:'These add up fast. List what you use: $10/seat × 5 tools × 5 people = $250/mo just in seat licenses.',affects:'G&A expense.',type:'currency',def:'$300',defSource:'Early-stage median'},
+      {q:38,label:'Workspace Costs',plain:'Monthly office/co-working cost? ($0 if fully remote)',why:'Remote = $0. Co-working = $200-500/person. Office lease = major fixed commitment.',affects:'G&A expense, fixed cost base.',type:'currency',def:'$0',defSource:'Remote-first default'},
+      {q:78,label:'Insurance',plain:'Annual business insurance costs? (E&O, D&O, cyber, general liability)',why:'Often required by enterprise customers and investors. Typical startup package is $2-5K/year.',affects:'G&A expense, compliance readiness.',type:'currency',def:'$3,000',defSource:'Embroker startup package median'},
+      {q:39,label:'Hardware & Equipment',plain:'Annual hardware costs? (Laptops for new hires, monitors, etc.)',why:'Budget ~$2,000-3,000 per new hire for equipment.',affects:'G&A expense, one-time costs per hire.',type:'currency',def:'$3,000'},
+      {q:40,label:'Legal & Compliance',plain:'Annual legal costs? (Corporate, IP, contracts, compliance certs)',why:'Often underestimated. SOC 2 alone is $5-15K. Patent filing is $10-15K. Standard legal retainer is $3-5K.',affects:'G&A expense, compliance gate.',type:'currency',def:'$8,000',defSource:'Adjusted for SOC 2 + corporate'},
+      {q:79,label:'Accounting & Finance',plain:'Annual accounting/bookkeeping costs?',why:'DIY works for a few months, but investors expect clean books. Fractional CFO + bookkeeper is $500-2,000/mo.',affects:'G&A expense.',type:'currency',def:'$6,000',defSource:'$500/mo bookkeeper baseline'},
+      {q:80,label:'Unexpected Expense Buffer',plain:'What % buffer should we add for unexpected costs?',why:'Things always cost more than expected. 10-15% buffer is standard financial planning.',affects:'Total expense projections, runway accuracy.',type:'number',def:'10',defSource:'Standard financial planning buffer'},
     ]},
     { num:5, title:'Funding & Capitalization', desc:'Funding history and capital structure for investor return modeling.', time:7, questions:[
       {q:41,label:'Funding History',plain:'List your previous funding rounds.',why:'Builds complete capital history.',affects:'Funding tab, cap table.',type:'textarea',def:'No prior funding',required:true,charLimit:500},
@@ -295,6 +320,36 @@
       calc: function(v){return (Number(v.p_paying_customers)||0)*(Number(v.p_avg_monthly_price)||0);},
       format:'$'
     },
+    '2_56': { // First 6-Month Customers
+      title: 'Think through your first customers',
+      fields: [
+        {id:'p_warm_leads',label:'People/companies already interested or in conversations?',type:'number',def:2},
+        {id:'p_launch_converts',label:'Expected conversions from launch (Product Hunt, LinkedIn, etc.)?',type:'number',def:1},
+        {id:'p_referral_month',label:'Referrals you\'d expect per month once live?',type:'number',def:0},
+      ],
+      calc: function(v){return (Number(v.p_warm_leads)||0)+(Number(v.p_launch_converts)||0)+(Number(v.p_referral_month)||0)*4;},
+      hint:'Be honest — these are your first real customers. Where will they actually come from?'
+    },
+    '2_57': { // Year 1 Customers
+      title: 'Build your Year 1 customer funnel',
+      fields: [
+        {id:'p_monthly_leads_y1',label:'Leads per month (website visits, demos, trials)?',type:'number',def:50},
+        {id:'p_convert_rate_y1',label:'Conversion rate to paid (%)?',type:'number',def:3},
+        {id:'p_months_selling_y1',label:'Months actively selling in Year 1?',type:'number',def:8},
+      ],
+      calc: function(v){var leads=Number(v.p_monthly_leads_y1)||50;var rate=(Number(v.p_convert_rate_y1)||3)/100;var months=Number(v.p_months_selling_y1)||8;return Math.round(leads*rate*months);},
+      hint:'If you get 50 leads/month at 3% conversion for 8 months, that\'s 12 customers.'
+    },
+    '2_58': { // Year 2 Customers
+      title: 'Project Year 2 growth',
+      fields: [
+        {id:'p_y1_end_custs',label:'Expected customers at end of Year 1?',type:'number',def:25},
+        {id:'p_monthly_growth_y2',label:'Monthly customer growth rate in Year 2 (%)?',type:'number',def:10},
+        {id:'p_churn_rate_y2',label:'Monthly churn rate (%)?',type:'number',def:5},
+      ],
+      calc: function(v){var custs=Number(v.p_y1_end_custs)||25;var growth=(Number(v.p_monthly_growth_y2)||10)/100;var churn=(Number(v.p_churn_rate_y2)||5)/100;for(var i=0;i<12;i++){custs=custs*(1+growth-churn);}return Math.round(custs);},
+      hint:'Accounts for both new customer adds AND churn losses each month.'
+    },
     '2_15': { // Gross Margin
       title: 'Estimate your gross margin',
       fields: [
@@ -327,6 +382,31 @@
       suffix:'%',
       hint:'No customers yet? Industry average for early SaaS is 5-8%.'
     },
+    '3_62': { // Monthly Marketing Budget
+      title: 'Build your marketing budget',
+      fields: [
+        {id:'p_content_seo',label:'Content creation / SEO ($)',type:'currency',def:500},
+        {id:'p_paid_ads',label:'Paid ads (Google, LinkedIn, Meta) ($)',type:'currency',def:500},
+        {id:'p_community',label:'Community / events / sponsorships ($)',type:'currency',def:200},
+        {id:'p_tools_mktg',label:'Marketing tools (email, analytics, CRM) ($)',type:'currency',def:200},
+        {id:'p_design_video',label:'Design / video production ($)',type:'currency',def:100},
+      ],
+      calc: function(v){return (Number(v.p_content_seo)||0)+(Number(v.p_paid_ads)||0)+(Number(v.p_community)||0)+(Number(v.p_tools_mktg)||0)+(Number(v.p_design_video)||0);},
+      format:'$',
+      hint:'Early stage: $1-3K/mo is typical. Scale up as you validate which channels work.'
+    },
+    '3_63': { // Conversion Rate
+      title: 'Estimate your conversion funnel',
+      fields: [
+        {id:'p_site_visitors',label:'Monthly website visitors expected?',type:'number',def:500},
+        {id:'p_signups',label:'How many will sign up / request demo?',type:'number',def:25},
+        {id:'p_activations',label:'How many will actually try the product?',type:'number',def:15},
+        {id:'p_paid_converts',label:'How many will become paying customers?',type:'number',def:3},
+      ],
+      calc: function(v){var visitors=Number(v.p_site_visitors)||1;var paid=Number(v.p_paid_converts)||0;return Math.round(paid/visitors*1000)/10;},
+      suffix:'%',
+      hint:'Visitor → Signup (5%) → Activation (60%) → Paid (20%) = ~0.6% end-to-end is normal for PLG.'
+    },
     '3_24': { // CAC
       title: 'Calculate your Customer Acquisition Cost',
       fields: [
@@ -345,6 +425,39 @@
         {id:'p_pct_annual',label:'What % of customers will choose annual? (%)',type:'number',def:40},
       ],
       calc: function(v){var mp=Number(v.p_monthly_price)||99;var disc=Number(v.p_annual_discount)||0;var pctAnn=Number(v.p_pct_annual)||0;var annualPrice=mp*12*(1-disc/100);var monthlyPrice=mp*12;return Math.round((pctAnn/100)*annualPrice+((100-pctAnn)/100)*monthlyPrice);},
+      format:'$'
+    },
+    '4_67': { // Founder Salaries
+      title: 'Calculate founder compensation cost',
+      fields: [
+        {id:'p_num_founders',label:'Number of founders',type:'number',def:2},
+        {id:'p_founder_sal',label:'Annual salary per founder ($)',type:'currency',def:0},
+      ],
+      calc: function(v){return (Number(v.p_num_founders)||1)*(Number(v.p_founder_sal)||0);},
+      format:'$',
+      hint:'$0 is common pre-seed. Post-funding, $60-100K is typical. Some founders defer salary for equity upside.'
+    },
+    '4_75': { // AI/ML API Costs
+      title: 'Estimate your AI API spend',
+      fields: [
+        {id:'p_api_calls_day',label:'API calls per day (current or projected)',type:'number',def:100},
+        {id:'p_cost_per_call',label:'Average cost per API call ($)',type:'currency',def:0.01},
+        {id:'p_fine_tuning',label:'Monthly fine-tuning / training costs ($)',type:'currency',def:0},
+      ],
+      calc: function(v){var daily=(Number(v.p_api_calls_day)||0)*(Number(v.p_cost_per_call)||0.01);return Math.round(daily*30+(Number(v.p_fine_tuning)||0));},
+      format:'$',
+      hint:'GPT-4: ~$0.03/call. Claude: ~$0.01/call. GPT-3.5: ~$0.002/call. Costs drop as you optimize.'
+    },
+    '4_74': { // Contractor Budget
+      title: 'Plan your contractor spend',
+      fields: [
+        {id:'p_dev_contractors',label:'Dev contractors (hours/month)',type:'number',def:0},
+        {id:'p_dev_rate',label:'Dev contractor hourly rate ($)',type:'currency',def:75},
+        {id:'p_design_hours',label:'Design contractor (hours/month)',type:'number',def:0},
+        {id:'p_design_rate',label:'Design contractor hourly rate ($)',type:'currency',def:60},
+        {id:'p_other_contract',label:'Other contractors monthly ($)',type:'currency',def:0},
+      ],
+      calc: function(v){return (Number(v.p_dev_contractors)||0)*(Number(v.p_dev_rate)||75)+(Number(v.p_design_hours)||0)*(Number(v.p_design_rate)||60)+(Number(v.p_other_contract)||0);},
       format:'$'
     },
     '4_31': { // Monthly Burn
@@ -587,7 +700,7 @@
     var h='';
     h+='<div class="card" style="padding:1rem 1.25rem;"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;"><div><span class="mono text-muted">Module '+mod.num+'/'+MODULES.length+'</span><strong style="margin-left:0.5rem;font-family:\'Barlow Semi Condensed\',sans-serif;letter-spacing:0.02em;">'+esc(mod.title)+'</strong></div><div class="mono text-muted">~'+mod.time+' min · Q'+(state.currentQ+1)+'/'+mod.questions.length+'</div></div><p style="font-size:0.85rem;color:var(--muted);margin:0.5rem 0 0;">'+esc(mod.desc)+'</p></div>';
 
-    h+='<div style="margin-bottom:0.5rem;"><div style="display:flex;justify-content:space-between;" class="mono text-muted"><span>'+answered+'/'+totalQuestions+' answered</span><span>'+pct+'%</span></div><div class="progress"><div class="progress-fill" style="width:'+pct+'%;background:var(--ocher-gold);"></div></div></div>';
+    h+='<div style="margin-bottom:0.5rem;"><div style="display:flex;justify-content:space-between;align-items:center;" class="mono text-muted"><span>'+answered+'/'+totalQuestions+' answered</span><button onclick="document.getElementById(\'glossaryFab\').click();" class="btn btn-outline btn-sm" style="font-size:0.7rem;padding:0.2rem 0.6rem;border-color:var(--ocher-gold);color:var(--ocher-gold);">📖 Terms & Definitions</button><span>'+pct+'%</span></div><div class="progress"><div class="progress-fill" style="width:'+pct+'%;background:var(--ocher-gold);"></div></div></div>';
 
     h+='<div class="module-pills">';
     MODULES.forEach(function(m){
@@ -957,7 +1070,7 @@
 
   // Build glossary UI
   var glossaryEl=document.createElement('div');
-  glossaryEl.innerHTML='<button class="glossary-fab" id="glossaryFab" title="Financial Terms Glossary">📖</button>'
+  glossaryEl.innerHTML='<button class="glossary-fab" id="glossaryFab" title="Financial Terms Glossary" style="font-size:1.5rem;line-height:1;">📖</button>'
     +'<div class="glossary-panel hidden" id="glossaryPanel">'
     +'<div class="glossary-header"><h3>📖 Financial Terms Glossary</h3><button style="background:none;border:none;color:var(--warm-cream);font-size:1.2rem;cursor:pointer;" id="glossaryClose">✕</button></div>'
     +'<div class="glossary-search"><input type="text" id="glossarySearch" placeholder="Search terms..."></div>'
