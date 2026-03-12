@@ -273,8 +273,12 @@
       fetch(API+'/api/founders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,name:name,company_name:company})})
       .then(function(r){return r.json();}).then(function(d){
         if(d.success){state.founder_id=d.founder_id;state.email=email;
+          // Auto-save company name as Q1 answer so it's not asked again
+          saveResponse('1_1',company);
           fetch(API+'/api/responses/'+d.founder_id).then(function(r){return r.json();}).then(function(rd){
             Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
+            // Skip Q1 (company name) since we already have it
+            state.currentModule=1;state.currentQ=1;
             location.hash='intake';
           });
         }else{document.getElementById('startError').textContent=d.error||'Error';document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='Begin Discovery →';}
@@ -351,12 +355,16 @@
     });
     inp.addEventListener('change',function(){clearTimeout(saveTimer);saveResponse(key,this.value);});}
 
-    document.getElementById('prevBtn')?.addEventListener('click',function(){
+    var prevBtn=document.getElementById('prevBtn');
+    if(prevBtn){prevBtn.addEventListener('click',function(){
+      // Save current before navigating
+      if(inp&&inp.value.trim())saveResponse(key,inp.value.trim());
       if(state.currentQ>0){state.currentQ--;}else if(state.currentModule>1){state.currentModule--;state.currentQ=MODULES[state.currentModule-1].questions.length-1;}
       renderIntake();
-    });
+    });}
 
-    document.getElementById('nextBtn')?.addEventListener('click',function(){
+    var nextBtn=document.getElementById('nextBtn');
+    if(nextBtn){nextBtn.addEventListener('click',function(){
       var val=(inp?inp.value:'').trim();
       if(q.required&&!val&&!state.responses[key]){toast('This question is required.','error');return;}
       if(val)saveResponse(key,val);
@@ -364,15 +372,16 @@
       else if(state.currentModule<MODULES.length){state.currentModule++;state.currentQ=0;}
       else{generateModel();return;}
       renderIntake();
-    });
+    });}
 
-    document.getElementById('skipBtn')?.addEventListener('click',function(){
+    var skipBtn=document.getElementById('skipBtn');
+    if(skipBtn){skipBtn.addEventListener('click',function(){
       saveResponse(key,q.def,'skipped_default');
       if(state.currentQ<mod.questions.length-1){state.currentQ++;}
       else if(state.currentModule<MODULES.length){state.currentModule++;state.currentQ=0;}
       else{generateModel();return;}
       renderIntake();
-    });
+    });}
 
     if(inp)inp.focus();
   }
