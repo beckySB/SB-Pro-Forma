@@ -84,6 +84,22 @@
 
     /* Skip box */
     .skip-box{border:1px solid var(--pale-clay);border-radius:6px;padding:0.75rem 1rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:0.75rem;background:rgba(253,244,226,0.4)}
+    .glossary-fab{position:fixed;bottom:1.5rem;right:1.5rem;width:48px;height:48px;border-radius:50%;background:var(--deep-black);color:var(--warm-cream);border:2px solid var(--ocher-gold);font-size:1.2rem;cursor:pointer;z-index:900;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 12px rgba(0,0,0,0.3);transition:transform 0.2s}
+    .glossary-fab:hover{transform:scale(1.1)}
+    .glossary-panel{position:fixed;bottom:4.5rem;right:1.5rem;width:380px;max-width:calc(100vw - 2rem);max-height:60vh;background:var(--white);border:1px solid var(--pale-clay);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.15);z-index:901;display:flex;flex-direction:column;overflow:hidden}
+    .glossary-panel.hidden{display:none}
+    .glossary-header{padding:1rem 1.25rem;background:var(--deep-black);color:var(--warm-cream);display:flex;justify-content:space-between;align-items:center}
+    .glossary-header h3{margin:0;font-family:'Barlow Semi Condensed',sans-serif;font-size:1rem}
+    .glossary-search{padding:0.75rem 1rem;border-bottom:1px solid var(--pale-clay)}
+    .glossary-search input{width:100%;padding:0.5rem 0.75rem;border:1px solid var(--pale-clay);border-radius:6px;font-size:0.85rem;font-family:Manrope,sans-serif}
+    .glossary-search input:focus{outline:none;border-color:var(--ocher-gold)}
+    .glossary-list{overflow-y:auto;padding:0.5rem 0;flex:1}
+    .glossary-item{padding:0.6rem 1.25rem;border-bottom:1px solid rgba(201,185,166,0.2)}
+    .glossary-item:last-child{border-bottom:none}
+    .glossary-term{font-family:'Barlow Semi Condensed',sans-serif;font-weight:700;font-size:0.9rem;color:var(--ocher-gold);margin-bottom:0.15rem}
+    .glossary-def{font-size:0.8rem;color:var(--deep-black);line-height:1.45}
+    .glossary-highlight{background:rgba(181,138,75,0.15);border-left:3px solid var(--ocher-gold)}
+    @media(max-width:480px){.glossary-panel{width:calc(100vw - 1rem);right:0.5rem;bottom:4rem;max-height:50vh}}
 
     /* Metric cards */
     .metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem}
@@ -892,6 +908,108 @@
     });
     document.getElementById('aPass').addEventListener('keydown',function(e){if(e.key==='Enter')document.getElementById('aLoginBtn').click();});
   }
+
+  // ─── Glossary ──────────────────────────────
+  var GLOSSARY={
+    'MRR':'Monthly Recurring Revenue — the predictable income your business earns every month from subscriptions.',
+    'ARR':'Annual Recurring Revenue — your MRR multiplied by 12. Shows how much you\'d earn in a year at the current rate.',
+    'TAM':'Total Addressable Market — the total amount of money that could be spent on products like yours if everyone who could buy it did.',
+    'SAM':'Serviceable Addressable Market — the portion of TAM that your company can realistically reach.',
+    'SOM':'Serviceable Obtainable Market — the realistic share of SAM you can capture in the near term.',
+    'CAC':'Customer Acquisition Cost — how much money it costs you to get one new paying customer.',
+    'LTV':'Lifetime Value — the total amount of money a customer will pay you during their entire time as a customer.',
+    'LTV/CAC':'Lifetime Value to Customer Acquisition Cost ratio — shows how much revenue you earn for every dollar spent acquiring a customer. 3:1 or higher is considered healthy.',
+    'ACV':'Annual Contract Value — the average yearly amount a single customer pays you.',
+    'ARPU':'Average Revenue Per User — total revenue divided by number of users.',
+    'NRR':'Net Revenue Retention — measures whether your existing customers are spending more or less over time. Over 100% means customers are growing.',
+    'Churn':'The percentage of customers who cancel or stop paying in a given period.',
+    'Gross Margin':'The percentage of revenue left after subtracting the direct costs of delivering your product (like hosting, support, and AI compute).',
+    'Burn Rate':'How much money your company spends per month beyond what it earns.',
+    'Runway':'How many months your company can keep operating at the current spending rate before running out of money.',
+    'GTM':'Go-to-Market — your strategy for reaching and selling to customers.',
+    'PLG':'Product-Led Growth — a strategy where the product itself drives customer acquisition (e.g., free trials, freemium).',
+    'SaaS':'Software as a Service — a business model where customers pay a recurring subscription to use your software.',
+    'B2B':'Business-to-Business — selling to other companies rather than individual consumers.',
+    'B2C':'Business-to-Consumer — selling directly to individual consumers.',
+    'B2B2C':'Business-to-Business-to-Consumer — selling to businesses who then serve consumers with your product.',
+    'SAFE':'Simple Agreement for Future Equity — a popular early-stage investment document where an investor gives money now in exchange for equity later.',
+    'ESOP':'Employee Stock Option Pool — shares set aside for employees as part of their compensation.',
+    'Cap Table':'Capitalization Table — a spreadsheet showing who owns what percentage of your company.',
+    'P&L':'Profit & Loss statement — a financial document showing your revenue, costs, and resulting profit or loss.',
+    'COGS':'Cost of Goods Sold — the direct costs of delivering your product to customers.',
+    'G&A':'General & Administrative — overhead costs like rent, utilities, legal, and accounting.',
+    'S&M':'Sales & Marketing — costs related to acquiring and retaining customers.',
+    'R&D':'Research & Development — costs related to building and improving your product.',
+    'Unit Economics':'The revenue and costs associated with a single customer. Shows whether each new customer is profitable.',
+    'Payback Period':'How many months it takes for a customer\'s payments to cover the cost of acquiring them.',
+    'Valuation':'What your company is worth. "Pre-money" is the value before new investment, "post-money" includes the new investment.',
+    'Dilution':'The reduction in existing shareholders\' ownership percentage when new shares are issued to investors.',
+    'SOC 2':'A security certification that proves your company handles customer data safely.',
+    'HIPAA':'Health Insurance Portability and Accountability Act — U.S. law requiring protection of patient health data.',
+    'Pre-Money':'The valuation of your company before receiving new investment.',
+    'Post-Money':'The valuation of your company after receiving new investment (pre-money + investment amount).',
+    'Convertible Note':'A loan that converts to equity at a future financing round, usually with a discount or valuation cap.',
+    'Revenue Multiple':'A way to value a company by multiplying its annual revenue by a number (e.g., 10x revenue).',
+    'Break-Even':'The point where your revenue equals your expenses — you\'re no longer losing money.',
+    'EBITDA':'Earnings Before Interest, Taxes, Depreciation and Amortization — a measure of operating profitability.'
+  };
+  var glossaryTerms=Object.keys(GLOSSARY).sort();
+
+  // Build glossary UI
+  var glossaryEl=document.createElement('div');
+  glossaryEl.innerHTML='<button class="glossary-fab" id="glossaryFab" title="Financial Terms Glossary">📖</button>'
+    +'<div class="glossary-panel hidden" id="glossaryPanel">'
+    +'<div class="glossary-header"><h3>📖 Financial Terms Glossary</h3><button style="background:none;border:none;color:var(--warm-cream);font-size:1.2rem;cursor:pointer;" id="glossaryClose">✕</button></div>'
+    +'<div class="glossary-search"><input type="text" id="glossarySearch" placeholder="Search terms..."></div>'
+    +'<div class="glossary-list" id="glossaryList"></div>'
+    +'</div>';
+  document.body.appendChild(glossaryEl);
+
+  function renderGlossary(filter){
+    var list=document.getElementById('glossaryList');
+    var f=(filter||'').toLowerCase();
+    var h='';
+    glossaryTerms.forEach(function(term){
+      if(f&&term.toLowerCase().indexOf(f)===-1&&GLOSSARY[term].toLowerCase().indexOf(f)===-1)return;
+      h+='<div class="glossary-item"><div class="glossary-term">'+esc(term)+'</div><div class="glossary-def">'+esc(GLOSSARY[term])+'</div></div>';
+    });
+    if(!h)h='<div style="padding:1.25rem;text-align:center;color:var(--cypress-mist);font-size:0.85rem;">No matching terms found.</div>';
+    list.innerHTML=h;
+  }
+
+  document.getElementById('glossaryFab').addEventListener('click',function(){
+    var panel=document.getElementById('glossaryPanel');
+    if(panel.classList.contains('hidden')){
+      panel.classList.remove('hidden');
+      renderGlossary();
+      document.getElementById('glossarySearch').focus();
+    }else{panel.classList.add('hidden');}
+  });
+  document.getElementById('glossaryClose').addEventListener('click',function(){
+    document.getElementById('glossaryPanel').classList.add('hidden');
+  });
+  document.getElementById('glossarySearch').addEventListener('input',function(){
+    renderGlossary(this.value);
+  });
+
+  // Auto-highlight relevant terms on each question
+  function highlightGlossaryTerms(){
+    var panel=document.getElementById('glossaryPanel');
+    if(panel.classList.contains('hidden'))return;
+    // Find terms mentioned in current question
+    var questionText=(document.querySelector('.card-accent h2')||{}).textContent||'';
+    var items=document.querySelectorAll('.glossary-item');
+    items.forEach(function(item){
+      var term=item.querySelector('.glossary-term').textContent;
+      if(questionText.toLowerCase().indexOf(term.toLowerCase())>-1){
+        item.classList.add('glossary-highlight');
+      }else{item.classList.remove('glossary-highlight');}
+    });
+  }
+
+  // Hook into renderIntake to auto-highlight
+  var _origRenderIntake=renderIntake;
+  renderIntake=function(){_origRenderIntake();setTimeout(highlightGlossaryTerms,100);};
 
   route();
 })();
