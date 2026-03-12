@@ -424,8 +424,9 @@
               Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
             }).catch(function(){});
           }
-          // Navigate immediately
+          // Navigate immediately — force render even if hash unchanged
           location.hash='intake';
+          route();
         }else{document.getElementById('startError').textContent=d.error||'Error';document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='Begin Discovery →';}
       }).catch(function(e){document.getElementById('startError').textContent=e.message;document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='Begin Discovery →';});
     });
