@@ -414,10 +414,14 @@
       fetch(API+'/api/founders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,name:name,company_name:company})})
       .then(function(r){return r.json();}).then(function(d){
         if(d.success){state.founder_id=d.founder_id;state.email=email;
-          // Auto-save company name as Q1 answer so it's not asked again
+          // Auto-save company name as Q1 answer
+          state.responses['1_1']=company;
           saveResponse('1_1',company);
+          // Load existing responses then go to intake
           fetch(API+'/api/responses/'+d.founder_id).then(function(r){return r.json();}).then(function(rd){
             Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
+            if(!state.responses['1_1'])state.responses['1_1']=company;
+          }).catch(function(){}).finally(function(){
             // Skip Q1 (company name) since we already have it
             state.currentModule=1;state.currentQ=1;
             location.hash='intake';
