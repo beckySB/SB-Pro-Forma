@@ -365,6 +365,111 @@
       calc: function(v){var eng=Number(v.p_eng_salary)||95000;var sales=Number(v.p_sales_salary)||75000;var ops=Number(v.p_ops_salary)||65000;var pe=(Number(v.p_pct_eng)||60)/100;var ps=(1-pe)/2;return Math.round(eng*pe+sales*ps+ops*ps);},
       format:'$'
     },
+    '2_18': { // Net Revenue Retention
+      title: 'Calculate your NRR',
+      fields: [
+        {id:'p_start_mrr',label:'MRR at start of last month from existing customers ($)',type:'currency',def:10000},
+        {id:'p_expansion',label:'Expansion revenue (upgrades, add-ons) ($)',type:'currency',def:500},
+        {id:'p_contraction',label:'Contraction (downgrades) ($)',type:'currency',def:200},
+        {id:'p_churned_rev',label:'Churned revenue (cancelled customers) ($)',type:'currency',def:400},
+      ],
+      calc: function(v){var s=Number(v.p_start_mrr)||1;var e=Number(v.p_expansion)||0;var c=Number(v.p_contraction)||0;var ch=Number(v.p_churned_rev)||0;return Math.round((s+e-c-ch)/s*100);},
+      suffix:'%',
+      hint:'Above 100% means existing customers grow faster than you lose them. Best SaaS companies hit 120%+.'
+    },
+    '2_19': { // Time to First Revenue
+      title: 'Estimate your timeline to revenue',
+      fields: [
+        {id:'p_product_months',label:'Months to finish MVP / first version?',type:'number',def:3},
+        {id:'p_beta_months',label:'Months of beta / free pilot?',type:'number',def:2},
+        {id:'p_sales_months',label:'Months to close first paying customer?',type:'number',def:1},
+      ],
+      calc: function(v){return (Number(v.p_product_months)||0)+(Number(v.p_beta_months)||0)+(Number(v.p_sales_months)||0);},
+      suffix:' months',
+      hint:'Already have revenue? Enter 0. Building but close? Count remaining months.'
+    },
+    '2_20': { // AI Infrastructure Cost %
+      title: 'Estimate your AI costs as % of revenue',
+      fields: [
+        {id:'p_monthly_ai_api',label:'Monthly AI API costs (OpenAI, Anthropic, etc.) ($)',type:'currency',def:500},
+        {id:'p_monthly_gpu',label:'Monthly GPU / compute costs ($)',type:'currency',def:300},
+        {id:'p_monthly_data',label:'Monthly data pipeline / storage costs ($)',type:'currency',def:200},
+        {id:'p_expected_monthly_rev',label:'Expected monthly revenue when live ($)',type:'currency',def:10000},
+      ],
+      calc: function(v){var costs=(Number(v.p_monthly_ai_api)||0)+(Number(v.p_monthly_gpu)||0)+(Number(v.p_monthly_data)||0);var rev=Number(v.p_expected_monthly_rev)||1;return Math.round(costs/rev*100);},
+      suffix:'%',
+      hint:'AI-heavy products typically spend 15-35% of revenue on AI infra. Traditional SaaS is under 10%.'
+    },
+    '3_26': { // LTV/CAC
+      title: 'Calculate your LTV/CAC ratio',
+      fields: [
+        {id:'p_avg_monthly_rev_cust',label:'Average monthly revenue per customer ($)',type:'currency',def:99},
+        {id:'p_gross_margin_pct',label:'Gross margin (%)',type:'number',def:70},
+        {id:'p_monthly_churn_pct',label:'Monthly churn rate (%)',type:'number',def:5},
+        {id:'p_cac2',label:'Cost to acquire one customer ($)',type:'currency',def:200},
+      ],
+      calc: function(v){var arpu=Number(v.p_avg_monthly_rev_cust)||99;var gm=(Number(v.p_gross_margin_pct)||70)/100;var churn=(Number(v.p_monthly_churn_pct)||5)/100;var cac=Number(v.p_cac2)||1;if(churn===0)churn=0.01;var ltv=(arpu*gm)/churn;return Math.round(ltv/cac*10)/10;},
+      suffix:'x',
+      hint:'3x+ is healthy. Under 1x means you lose money on every customer. Best SaaS companies hit 5x+.'
+    },
+    '3_27': { // CAC Payback
+      title: 'Calculate CAC payback period',
+      fields: [
+        {id:'p_cac3',label:'Cost to acquire one customer ($)',type:'currency',def:200},
+        {id:'p_monthly_rev_cust',label:'Monthly revenue from that customer ($)',type:'currency',def:99},
+        {id:'p_gm_pct',label:'Gross margin (%)',type:'number',def:70},
+      ],
+      calc: function(v){var cac=Number(v.p_cac3)||200;var rev=Number(v.p_monthly_rev_cust)||99;var gm=(Number(v.p_gm_pct)||70)/100;var monthlyProfit=rev*gm;if(monthlyProfit<=0)return 36;return Math.round(cac/monthlyProfit);},
+      suffix:' months',
+      hint:'Under 12 months is great. 18-24 is typical. Over 24 means you need more capital upfront.'
+    },
+    '4_33': { // Hiring Plan
+      title: 'Plan your hires by role',
+      fields: [
+        {id:'p_hire_eng',label:'Engineers to hire',type:'number',def:1},
+        {id:'p_hire_sales',label:'Sales / marketing hires',type:'number',def:1},
+        {id:'p_hire_ops',label:'Operations / support hires',type:'number',def:0},
+        {id:'p_hire_exec',label:'Executive hires (CTO, VP, etc.)',type:'number',def:0},
+      ],
+      calc: function(v){return (Number(v.p_hire_eng)||0)+(Number(v.p_hire_sales)||0)+(Number(v.p_hire_ops)||0)+(Number(v.p_hire_exec)||0);},
+      hint:'Think about what you need to hit your next milestone. What roles are blocking growth?'
+    },
+    '4_35': { // Benefits Burden Rate
+      title: 'Estimate your benefits burden',
+      fields: [
+        {id:'p_payroll_tax',label:'Payroll taxes (FICA, Medicare, etc.) %',type:'number',def:8},
+        {id:'p_health_ins',label:'Health insurance per employee / month ($)',type:'currency',def:500},
+        {id:'p_avg_sal_ref',label:'Average monthly salary ($)',type:'currency',def:7000},
+        {id:'p_other_benefits',label:'Other benefits (401k match, etc.) %',type:'number',def:3},
+      ],
+      calc: function(v){var tax=Number(v.p_payroll_tax)||8;var health=Number(v.p_health_ins)||500;var sal=Number(v.p_avg_sal_ref)||7000;var other=Number(v.p_other_benefits)||3;var healthPct=sal>0?Math.round(health/sal*100):7;return tax+healthPct+other;},
+      suffix:'%',
+      hint:'US average is 20-30%. Early startups offering minimal benefits may be closer to 15%.'
+    },
+    '4_36': { // Monthly Hosting
+      title: 'Add up your cloud costs',
+      fields: [
+        {id:'p_cloud_compute',label:'Cloud compute (AWS, GCP, Azure) ($)',type:'currency',def:500},
+        {id:'p_database',label:'Database hosting ($)',type:'currency',def:100},
+        {id:'p_ai_inference',label:'AI/ML inference costs ($)',type:'currency',def:300},
+        {id:'p_cdn_storage',label:'CDN + storage ($)',type:'currency',def:50},
+        {id:'p_monitoring',label:'Monitoring + logging ($)',type:'currency',def:50},
+      ],
+      calc: function(v){return (Number(v.p_cloud_compute)||0)+(Number(v.p_database)||0)+(Number(v.p_ai_inference)||0)+(Number(v.p_cdn_storage)||0)+(Number(v.p_monitoring)||0);},
+      format:'$'
+    },
+    '4_40': { // Legal & Compliance
+      title: 'Estimate your legal costs',
+      fields: [
+        {id:'p_incorporation',label:'Incorporation / corporate maintenance ($)',type:'currency',def:1500},
+        {id:'p_ip_patents',label:'IP / patent filings ($)',type:'currency',def:0},
+        {id:'p_contracts',label:'Contract templates + review ($)',type:'currency',def:2000},
+        {id:'p_compliance',label:'Compliance (SOC 2, GDPR, etc.) ($)',type:'currency',def:1500},
+      ],
+      calc: function(v){return (Number(v.p_incorporation)||0)+(Number(v.p_ip_patents)||0)+(Number(v.p_contracts)||0)+(Number(v.p_compliance)||0);},
+      format:'$',
+      hint:'SOC 2 alone can cost $5-15K. Budget more if in healthcare or financial services.'
+    },
     '5_42': { // Current Valuation
       title: 'Estimate your valuation',
       fields: [
@@ -374,6 +479,27 @@
       calc: function(v){var rev=Number(v.p_annual_revenue)||0;var mult=Number(v.p_revenue_multiple)||15;if(rev===0)return 4000000;return Math.round(rev*mult/100000)*100000;},
       format:'$',
       hint:'Pre-revenue? Most pre-seed valuations range $2-6M based on team, market, and traction.'
+    },
+    '5_44': { // ESOP
+      title: 'Think about your option pool',
+      fields: [
+        {id:'p_key_hires',label:'Key hires in next 2 years',type:'number',def:5},
+        {id:'p_avg_grant_pct',label:'Average equity grant per hire (%)',type:'number',def:0.5},
+        {id:'p_advisor_grants',label:'Total advisor equity (%)',type:'number',def:2},
+      ],
+      calc: function(v){var hires=(Number(v.p_key_hires)||0)*(Number(v.p_avg_grant_pct)||0.5);var adv=Number(v.p_advisor_grants)||0;return Math.round((hires+adv)*10)/10;},
+      suffix:'%',
+      hint:'VCs typically want 10-15% option pool pre-investment. Engineers often get 0.25-1% each.'
+    },
+    '5_46': { // Target Valuation
+      title: 'Estimate your target valuation',
+      fields: [
+        {id:'p_raise_amount',label:'How much are you raising? ($)',type:'currency',def:500000},
+        {id:'p_dilution_target',label:'Target dilution (% of company to sell)',type:'number',def:15},
+      ],
+      calc: function(v){var raise=Number(v.p_raise_amount)||500000;var dilution=(Number(v.p_dilution_target)||15)/100;if(dilution===0)dilution=0.15;return Math.round(raise/dilution/100000)*100000;},
+      format:'$',
+      hint:'Standard: sell 10-20% per round. $500K at 15% dilution = $3.3M post-money.'
     },
   };
 
