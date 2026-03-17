@@ -117,7 +117,17 @@ try {
       host: SMTP_HOST,
       port: 587,
       secure: false,
-      auth: { user: EMAIL_USER, pass: EMAIL_PASSWORD }
+      auth: { user: EMAIL_USER, pass: EMAIL_PASSWORD },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
+    });
+    // Verify SMTP connection on startup
+    transporter.verify().then(() => {
+      console.log('✓ Email SMTP verified — connection works');
+    }).catch(e => {
+      console.error('⚠ Email SMTP verify FAILED:', e.message);
+      console.error('  Host:', SMTP_HOST, '| User:', EMAIL_USER);
     });
     console.log('✓ Email configured:', EMAIL_USER);
   } else {
@@ -309,12 +319,12 @@ app.post('/api/generate-model/:founder_id', (req, res) => {
     if (transporter) {
       console.log(`[EMAIL] Sending admin notification for ${founder.company_name} to ${ADMIN_EMAIL}...`);
       sendAdminNotification(founder, model, responseTypes, founderNotes)
-        .then(() => { db.prepare(`UPDATE completions SET admin_email_sent=1 WHERE model_id=?`).run(modelId); })
-        .catch(e => console.error('[EMAIL] Admin email FAILED:', e.message, e.stack));
+        .then(() => { console.log(`[EMAIL] ✅ Admin notification SENT to ${ADMIN_EMAIL}`); db.prepare(`UPDATE completions SET admin_email_sent=1 WHERE model_id=?`).run(modelId); })
+        .catch(e => console.error(`[EMAIL] ❌ Admin email FAILED: ${e.message}\n${e.stack}`));
       console.log(`[EMAIL] Sending founder report to ${founder.email}...`);
       sendFounderReport(founder, model)
-        .then(() => { db.prepare(`UPDATE completions SET founder_email_sent=1 WHERE model_id=?`).run(modelId); })
-        .catch(e => console.error('[EMAIL] Founder report FAILED:', e.message, e.stack));
+        .then(() => { console.log(`[EMAIL] ✅ Founder report SENT to ${founder.email}`); db.prepare(`UPDATE completions SET founder_email_sent=1 WHERE model_id=?`).run(modelId); })
+        .catch(e => console.error(`[EMAIL] ❌ Founder report FAILED: ${e.message}\n${e.stack}`));
     } else {
       console.log('[EMAIL] ⚠️ No email transporter — emails NOT sent');
     }
@@ -323,6 +333,117 @@ app.post('/api/generate-model/:founder_id', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /report/:founder_id — Server-rendered SBH-branded report (opens as printable page)
+app.get('/report/:founder_id', (req, res) => {
+  const row = db.prepare('SELECT * FROM financial_models WHERE founder_id = ? ORDER BY generated_at DESC LIMIT 1').get(req.params.founder_id);
+  if (!row) return res.status(404).send('No model generated yet. Complete the intake first.');
+  const founder = db.prepare('SELECT * FROM founders WHERE id = ?').get(req.params.founder_id);
+  if (!founder) return res.status(404).send('Founder not found');
+  const m = JSON.parse(row.model_json);
+  delete m._valuation;
+  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const ef = n => { n=Number(n)||0; if(Math.abs(n)>=1e6) return '$'+(n/1e6).toFixed(1)+'M'; if(Math.abs(n)>=1e3) return '$'+Math.round(n/1e3).toLocaleString()+'K'; return '$'+n.toLocaleString(); };
+  const pnl=m.five_year_pnl||[], ue=m.unit_economics||{}, fs2=m.funding_summary||{}, cash=m.cash_position||[], hc=m.headcount_summary||[], arr=m.arr_waterfall||[], gtm=m.gtm_strategy||{}, run=m.runway_analysis||{};
+  const sc=m.finance_score||{}, scColor=sc.score>=4?'#4F5B45':sc.score>=3?'#B58A4B':'#9C4F38';
+  const date = new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+  const company = esc(m.company_name || founder.company_name);
+
+  let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${company} — Pro Forma Report</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;700&family=Manrope:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Manrope,sans-serif;color:#130702;background:#fff;padding:0;font-size:11px;line-height:1.5}
+.page{padding:0.6in 0.75in;page-break-after:always;position:relative;min-height:10in}
+.header{background:#130702;padding:1.25rem 1.5rem;display:flex;justify-content:space-between;align-items:center;margin:-0.6in -0.75in 1.5rem;padding-left:0.75in;padding-right:0.75in}
+.logo-text{color:#FDF4E2}
+.logo-sm{font-size:8px;letter-spacing:4px;font-weight:600;font-family:"Barlow Semi Condensed",sans-serif}
+.logo-lg{font-size:22px;font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;margin-top:-3px;letter-spacing:1px}
+.subtitle{color:#B58A4B;font-size:10px;font-weight:600}
+.date-text{color:#959685;font-size:9px;text-align:right}
+.footer-bar{position:fixed;bottom:0;left:0;right:0;background:#130702;padding:0.4rem 0.75in;display:flex;justify-content:space-between;font-size:7px;color:#676C5C}
+.footer-bar a{color:#B58A4B;text-decoration:none}
+h2{font-family:"Barlow Semi Condensed",sans-serif;font-size:14px;font-weight:600;margin:1.25rem 0 0.5rem;padding-bottom:0.25rem;border-bottom:1px solid #C9B9A6;color:#130702}
+table{width:100%;border-collapse:collapse;font-size:10px;margin:0.3rem 0}
+th{background:#f5f5f5;text-align:left;padding:4px 6px;font-size:9px;font-weight:600;text-transform:uppercase;color:#676C5C;letter-spacing:0.5px}
+td{padding:3px 6px;border-bottom:1px solid #eee}
+.bold{font-weight:700}.right{text-align:right}
+.red{color:#9C4F38}.green{color:#4F5B45}.gold{color:#B58A4B}
+.score-box{text-align:center;padding:1rem;border-radius:8px;margin:0.5rem 0}
+.metric-row{display:flex;gap:1rem;flex-wrap:wrap;margin:0.5rem 0}
+.metric-item{flex:1;min-width:90px;text-align:center;padding:0.4rem;background:#FDF4E2;border-radius:4px}
+.metric-val{font-size:16px;font-weight:700;font-family:"Barlow Semi Condensed",sans-serif}
+.metric-label{font-size:8px;color:#676C5C;text-transform:uppercase;letter-spacing:0.5px}
+.insight{padding:0.3rem 0.5rem;margin:0.2rem 0;border-radius:3px;font-size:9px}
+.callout{padding:0.6rem 0.8rem;border-left:3px solid #B58A4B;background:#FDF4E2;border-radius:0 4px 4px 0;margin:0.5rem 0;font-size:10px}
+.print-btn{position:fixed;top:10px;right:10px;background:#130702;color:#FDF4E2;border:none;padding:8px 18px;border-radius:4px;font-family:"Barlow Semi Condensed",sans-serif;font-weight:600;font-size:12px;cursor:pointer;z-index:999;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
+.print-btn:hover{background:#B58A4B;color:#130702}
+@media print{.footer-bar{position:fixed}.page{page-break-after:always}.print-btn{display:none!important}@page{margin:0;size:letter}}
+</style></head><body>
+<button class="print-btn" onclick="window.print()">⬇ Save as PDF</button>`;
+
+  // PAGE 1
+  html += `<div class="page">
+<div class="header"><div class="logo-text"><div class="logo-sm">SILICON</div><div class="logo-lg">bayou</div></div><div><div class="subtitle">AI SaaS Founder Pro Forma</div><div class="date-text">${company}<br>${date}</div></div></div>
+<div class="score-box" style="background:${sc.score>=4?'#E8F5E9':sc.score>=3?'#FDF4E2':'#FFEBEE'}">
+  <div style="font-size:36px;font-weight:700;color:${scColor};">${sc.score}/5</div>
+  <div style="font-size:12px;font-weight:600;">Finance Score: ${esc(sc.label||'')}</div>
+  <div style="font-size:9px;color:#666;margin-top:2px;">${(sc.gates_passed||[]).length}/${sc.total_gates} quality gates passed</div>
+</div>
+<div class="metric-row">
+  <div class="metric-item"><div class="metric-val">${ef(pnl[0]?.revenue||0)}</div><div class="metric-label">Y1 Revenue</div></div>
+  <div class="metric-item"><div class="metric-val">${ef(pnl[4]?.revenue||0)}</div><div class="metric-label">Y5 Revenue</div></div>
+  <div class="metric-item"><div class="metric-val">${fs2.break_even_year?'Y'+fs2.break_even_year:'Beyond Y5'}</div><div class="metric-label">Break-Even</div></div>
+  <div class="metric-item"><div class="metric-val">${ef(fs2.current_raise||0)}</div><div class="metric-label">Target Raise</div></div>
+</div>
+<div class="metric-row">
+  <div class="metric-item"><div class="metric-val">$${ue.cac||0}</div><div class="metric-label">CAC</div></div>
+  <div class="metric-item"><div class="metric-val">${ue.ltv_cac_ratio||0}x</div><div class="metric-label">LTV:CAC</div></div>
+  <div class="metric-item"><div class="metric-val">${ue.payback_months||0}mo</div><div class="metric-label">Payback</div></div>
+  <div class="metric-item"><div class="metric-val">${ue.gross_margin||0}%</div><div class="metric-label">Gross Margin</div></div>
+  <div class="metric-item"><div class="metric-val">${ue.monthly_churn_pct||0}%</div><div class="metric-label">Monthly Churn</div></div>
+</div>
+<h2>5-Year Projected P&L</h2>
+<table><tr><th>Metric</th>${pnl.map(p=>'<th class="right">Year '+p.year+'</th>').join('')}</tr>
+${[{l:'Revenue',k:'revenue',b:1},{l:'COGS',k:'cogs'},{l:'Gross Profit',k:'gross_profit',b:1},{l:'Gross Margin %',k:'gross_margin_pct',p:1},{l:'Sales & Marketing',k:'sales_marketing'},{l:'R&D',k:'research_development'},{l:'G&A',k:'general_admin'},{l:'EBITDA',k:'ebitda',b:1},{l:'EBITDA Margin %',k:'ebitda_margin_pct',p:1},{l:'Customers',k:'customers_end'}].map(row =>
+  '<tr'+(row.b?' class="bold"':'')+'><td>'+row.l+'</td>'+pnl.map(p=>{const v=p[row.k];return '<td class="right'+(v<0?' red':'')+'">'+(row.p?(v||0).toFixed(1)+'%':ef(v))+'</td>';}).join('')+'</tr>'
+).join('')}
+</table>
+</div>`;
+
+  // PAGE 2
+  html += `<div class="page">
+<div class="header"><div class="logo-text"><div class="logo-sm">SILICON</div><div class="logo-lg">bayou</div></div><div><div class="subtitle">Pro Forma Report — Continued</div><div class="date-text">${company}</div></div></div>
+<h2>Cash Position & Runway</h2>
+<table><tr><th>Year</th><th class="right">Cash Balance</th><th class="right">Net Burn</th><th class="right">Runway</th><th>Status</th></tr>
+${cash.map(c=>'<tr><td>Year '+c.year+'</td><td class="right '+(c.cash_balance<0?'red bold':'green')+'">'+ef(c.cash_balance)+'</td><td class="right '+(c.net_burn<0?'red':'green')+'">'+ef(c.net_burn)+'</td><td class="right">'+(c.runway_months>=60?'Cash+':c.runway_months+'mo')+'</td><td style="font-size:9px;">'+(c.milestone||'On track')+'</td></tr>').join('')}
+</table>
+${run.explanation?'<div class="callout"><strong>Current Runway:</strong> '+esc(run.explanation)+'</div>':''}
+${run.post_raise_explanation?'<div class="callout" style="border-color:#4F5B45;background:#E8F5E9;"><strong>Post-Raise:</strong> '+esc(run.post_raise_explanation)+'</div>':''}
+<h2>ARR Waterfall</h2>
+<table><tr><th>Year</th><th class="right">Start ARR</th><th class="right">End ARR</th><th class="right">YoY Growth</th><th class="right">Customers</th><th>Milestone</th></tr>
+${arr.map(a=>'<tr><td>Year '+a.year+'</td><td class="right">'+ef(a.start_arr)+'</td><td class="right bold">'+ef(a.end_arr)+'</td><td class="right">'+(a.yoy_growth_pct>998?'—':a.yoy_growth_pct+'%')+'</td><td class="right">'+a.customers_end+'</td><td style="font-size:9px;" class="gold">'+(a.annotation||'')+'</td></tr>').join('')}
+</table>
+<h2>Headcount Projection</h2>
+<table><tr><th>Year</th><th class="right">Total</th><th class="right">Engineering</th><th class="right">Sales & Mkt</th><th class="right">G&A</th></tr>
+${hc.map(h=>'<tr><td>Year '+h.year+'</td><td class="right bold">'+h.total+'</td><td class="right">'+h.engineering+'</td><td class="right">'+h.sales_marketing+'</td><td class="right">'+h.general_admin+'</td></tr>').join('')}
+</table>
+${gtm.motion?`<h2>Go-to-Market Strategy</h2>
+<p><strong>Motion:</strong> ${esc(gtm.motion_label||'')}</p>
+<div class="metric-row" style="margin-top:0.3rem;">
+  <div class="metric-item"><div class="metric-val">${gtm.sales_cycle_months}mo</div><div class="metric-label">Sales Cycle</div></div>
+  <div class="metric-item"><div class="metric-val">${gtm.cac_payback_months}mo</div><div class="metric-label">CAC Payback</div></div>
+</div>
+${(gtm.insights||[]).map(i=>'<div class="insight" style="background:'+(i.type==='warning'?'#FFF3E0':i.type==='strength'?'#E8F5E9':'#f5f5f5')+';">'+(i.type==='warning'?'⚠️ ':i.type==='strength'?'✅ ':'💡 ')+esc(i.text)+'</div>').join('')}`:''}
+</div>`;
+
+  // Footer
+  html += `<div class="footer-bar"><div>Silicon Bayou Holdings · Confidential & Proprietary</div><div><em>Laissez les bons temps coder!</em> · <a href="https://siliconbayou.ai">siliconbayou.ai</a></div></div>
+</body></html>`;
+
+  res.setHeader('Content-Type', 'text/html');
+  res.send(html);
 });
 
 // GET /api/model/:founder_id — Get latest model (public — strips valuation)
