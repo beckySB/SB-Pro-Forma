@@ -115,8 +115,8 @@ try {
     const nodemailer = require('nodemailer');
     transporter = nodemailer.createTransport({
       host: SMTP_HOST,
-      port: 587,
-      secure: false,
+      port: 465,
+      secure: true,
       auth: { user: EMAIL_USER, pass: EMAIL_PASSWORD },
       connectionTimeout: 10000,
       greetingTimeout: 10000,
