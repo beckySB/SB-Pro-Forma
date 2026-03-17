@@ -755,7 +755,7 @@ function generateFinancialModel(founder, answers) {
   if (answered >= 30) gates.push('Scenario Coverage');
 
   const score = gates.length <= 1 ? 1 : gates.length <= 2 ? 2 : gates.length <= 4 ? 3 : gates.length <= 5 ? 4 : 5;
-  const scoreLabels = { 1: 'Pre-Financial', 2: 'Emerging', 3: 'Developing', 4: 'Investor-Ready', 5: 'Fully Optimized' };
+  const scoreLabels = { 1: 'Pre-Financial', 2: 'Emerging', 3: 'Developing', 4: 'Market-Ready', 5: 'Fully Optimized' };
 
   const financeScore = {
     score, label: scoreLabels[score],
@@ -763,7 +763,7 @@ function generateFinancialModel(founder, answers) {
     total_gates: 7,
     gap_analysis: gates.length < 7 ?
       `Focus on: ${['Assumption Transparency', 'Revenue Plausibility', 'Unit Economics Viability', 'Runway Integrity', 'Gross Margin Credibility', 'Headcount Coherence', 'Scenario Coverage'].filter(g => !gates.includes(g)).join(', ')}` :
-      'All quality gates passed — model is investor-ready.',
+      'All quality gates passed — model is market-ready.',
   };
 
   // ─── GTM Strategy Analysis ───
@@ -1189,21 +1189,21 @@ async function sendFounderReport(founder, model) {
   if (score >= 4) {
     actionPlan = `
       <div style="background:#E8F5E9;border-left:3px solid #4F5B45;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
-        <p style="margin:0;font-weight:700;color:#4F5B45;">🏆 Investor-Ready Model</p>
-        <p style="margin:0.25rem 0 0;font-size:0.85rem;">Your financials tell a compelling story. You're in a strong position for investor conversations.</p>
+        <p style="margin:0;font-weight:700;color:#4F5B45;">🏆 Market-Ready Model</p>
+        <p style="margin:0.25rem 0 0;font-size:0.85rem;">Your financials tell a compelling story. Your unit economics, growth trajectory, and cost structure are well-articulated — you're ready to start building around this foundation.</p>
       </div>
       <h3 style="color:#130702;font-size:0.95rem;">Your 7-Day Action Plan</h3>
       <ol style="font-size:0.85rem;line-height:1.9;">
         <li><strong>Day 1-2:</strong> Review your full dashboard — validate key assumptions with 2-3 potential customers</li>
-        <li><strong>Day 3-4:</strong> Build your pitch deck using these financials as the backbone</li>
-        <li><strong>Day 5-6:</strong> Identify 10 target investors and research their portfolio for fit</li>
-        <li><strong>Day 7:</strong> Connect with SBH for warm investor introductions</li>
+        <li><strong>Day 3-4:</strong> Map your go-to-market strategy — who are your first 10 customers and how do you reach them?</li>
+        <li><strong>Day 5-6:</strong> Identify what you need to be pitch-ready — brand, site, deck, social presence</li>
+        <li><strong>Day 7:</strong> Connect with SBH — we'll help you build everything you need to go to market</li>
       </ol>`;
   } else if (score >= 3) {
     actionPlan = `
       <div style="background:#FDF4E2;border-left:3px solid #B58A4B;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
         <p style="margin:0;font-weight:700;color:#B58A4B;">📈 Getting Close — Gaps to Address</p>
-        <p style="margin:0.25rem 0 0;font-size:0.85rem;">Solid foundation, but sophisticated investors will probe the gaps. Let's close them.</p>
+        <p style="margin:0.25rem 0 0;font-size:0.85rem;">Solid foundation, but there are gaps that need tightening before you're market-ready. Let's close them.</p>
       </div>
       <h3 style="color:#130702;font-size:0.95rem;">Your 14-Day Action Plan</h3>
       <ol style="font-size:0.85rem;line-height:1.9;">
@@ -1211,7 +1211,7 @@ async function sendFounderReport(founder, model) {
         <li><strong>Focus:</strong> ${gapAnalysis}</li>
         <li><strong>Validate:</strong> Talk to 5 potential customers about pricing and willingness to pay</li>
         <li><strong>Re-generate:</strong> Update inputs and regenerate for an improved score</li>
-        <li><strong>Accelerate:</strong> Book a 30-minute call with SBH — we'll walk through the gaps together</li>
+        <li><strong>Accelerate:</strong> Book a call with SBH — our C-suite specialists will walk through the gaps with you and build a roadmap to market</li>
       </ol>`;
   } else {
     actionPlan = `
@@ -1225,7 +1225,7 @@ async function sendFounderReport(founder, model) {
         <li><strong>Week 2:</strong> Research competitor pricing and validate your price point</li>
         <li><strong>Week 3:</strong> Talk to 10 potential customers — can you hit your targets?</li>
         <li><strong>Week 4:</strong> Regenerate and aim for 3+/5</li>
-        <li><strong>Shortcut:</strong> Book a session with SBH to work through the planning in a structured way</li>
+        <li><strong>Shortcut:</strong> Book a session with SBH — we'll pair you with specialists who guide founders from idea through go-to-market</li>
       </ol>`;
   }
 
@@ -1276,7 +1276,7 @@ async function sendFounderReport(founder, model) {
     ${(runway.milestones_before_next_raise || []).length > 0 ? `
     <div style="background:#E3F2FD;border-left:3px solid #1565C0;padding:0.75rem;border-radius:0 6px 6px 0;margin:0.75rem 0;">
       <p style="margin:0 0 0.4rem;font-weight:700;color:#1565C0;font-size:0.85rem;">🎯 Key Milestones Before Your Next Raise</p>
-      <p style="margin:0;font-size:0.78rem;color:#666;">Hit these before going back to investors — each one de-risks your company and improves your position:</p>
+      <p style="margin:0;font-size:0.78rem;color:#666;">Hit these to strengthen your position — each one validates your business and builds your pitch story:</p>
       <ul style="margin:0.4rem 0 0;padding-left:1.2rem;font-size:0.82rem;">
         ${(runway.milestones_before_next_raise || []).map(m => `<li style="margin-bottom:0.25rem;">${m}</li>`).join('')}
       </ul>
@@ -1296,12 +1296,12 @@ async function sendFounderReport(founder, model) {
       <tr><td style="padding:6px 0;color:#888;">Gross Margin</td><td style="font-weight:600;">${ue.gross_margin||0}%</td></tr>
     </table>
     <div style="background:#f9f9f9;border-radius:6px;padding:0.75rem;margin:0.5rem 0;font-size:0.8rem;">
-      <p style="margin:0;"><strong>What investors look for:</strong></p>
+      <p style="margin:0;"><strong>Healthy SaaS benchmarks:</strong></p>
       <ul style="margin:0.3rem 0 0;padding-left:1.2rem;">
         <li><strong>LTV:CAC > 3x</strong> — you earn 3× what you spend to acquire each customer</li>
         <li><strong>Payback < 12 months</strong> — you recover acquisition cost within a year</li>
-        <li><strong>Gross Margin > 70%</strong> — typical for SaaS; under 60% raises concerns</li>
-        <li><strong>Annual Churn < 10%</strong> — losing more than 1 in 10 customers yearly is a red flag</li>
+        <li><strong>Gross Margin > 70%</strong> — typical for SaaS; under 60% signals a cost problem</li>
+        <li><strong>Annual Churn < 10%</strong> — losing more than 1 in 10 customers yearly means the bucket is leaking</li>
       </ul>
     </div>
   `;
@@ -1339,7 +1339,7 @@ async function sendFounderReport(founder, model) {
                 return `<span style="font-size:0.6rem;padding:0.15rem 0.4rem;border-radius:3px;background:${passed?'rgba(79,91,69,0.15)':'rgba(0,0,0,0.05)'};color:${passed?'#4F5B45':'#999'};">${passed?'✓ ':''}${g}</span>`;
               }).join('')}
             </div>
-            <p style="font-size:0.75rem;color:#888;margin:0.5rem 0 0;font-style:italic;">Your Finance Score measures how complete, realistic, and investor-ready your financial model is — not whether your business is good or bad.</p>
+            <p style="font-size:0.75rem;color:#888;margin:0.5rem 0 0;font-style:italic;">Your Finance Score measures how complete, realistic, and market-ready your financial model is — not whether your business is good or bad.</p>
           </div>
 
           <!-- 5-Year Projection -->
@@ -1370,11 +1370,11 @@ async function sendFounderReport(founder, model) {
           <div style="background:#130702;border-radius:8px;padding:1.5rem;margin:1.5rem 0;text-align:center;">
             <div style="font-family:'Barlow Semi Condensed',Arial,sans-serif;letter-spacing:3px;color:#FDF4E2;font-size:0.6rem;font-weight:600;">SILICON</div>
             <div style="font-family:'Barlow Semi Condensed',Arial,sans-serif;color:#FDF4E2;font-size:1.2rem;font-weight:700;margin-top:-2px;">bayou</div>
-            <p style="color:#C9B9A6;font-size:0.85rem;margin:0.75rem 0 0;">Whether you're refining your model, building your pitch, or preparing for investor conversations — we're here to help.</p>
+            <p style="color:#C9B9A6;font-size:0.85rem;margin:0.75rem 0 0;">Silicon Bayou is a venture studio with a C-suite team of specialists. We guide founders from idea through go-to-market — pro forma, GTM strategy, brand, site, pitch deck, social presence, Louisiana incentives, and everything you need to launch and grow.</p>
             <div style="margin-top:1rem;">
-              <a href="https://siliconbayou.ai" style="display:inline-block;background:#B58A4B;color:#FDF4E2;padding:12px 32px;border-radius:6px;text-decoration:none;font-weight:600;">Schedule a Call with SBH →</a>
+              <a href="https://siliconbayou.ai" style="display:inline-block;background:#B58A4B;color:#FDF4E2;padding:12px 32px;border-radius:6px;text-decoration:none;font-weight:600;">Let's Build Your Go-to-Market →</a>
             </div>
-            <p style="color:#676C5C;font-size:0.7rem;margin:0.75rem 0 0;">Free 30-minute strategy session · No obligation · Pitch prep, financial modeling, investor intros</p>
+            <p style="color:#676C5C;font-size:0.7rem;margin:0.75rem 0 0;">Strategy session · No obligation · GTM, brand, pitch prep, LA incentive navigation</p>
           </div>
         </div>
 
@@ -1426,7 +1426,7 @@ async function sendFollowUp(founder, model) {
 
           <div style="background:#FDF4E2;border-left:3px solid #B58A4B;padding:1rem;border-radius:0 6px 6px 0;margin:1.5rem 0;">
             <p style="margin:0;font-weight:600;color:#130702;">Ready to move faster?</p>
-            <p style="margin:0.25rem 0 0;font-size:0.85rem;">SBH offers hands-on support for AI SaaS founders — from financial modeling to investor introductions.</p>
+            <p style="margin:0.25rem 0 0;font-size:0.85rem;">SBH is a venture studio with C-suite specialists who guide founders from idea through go-to-market — pro forma, GTM strategy, brand, pitch deck, LA incentives, and everything you need to launch.</p>
             <p style="margin:0.5rem 0 0;"><a href="https://siliconbayou.ai" style="color:#B58A4B;font-weight:600;">Connect with SBH →</a></p>
           </div>
         </div>
