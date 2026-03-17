@@ -72,6 +72,31 @@ db.exec(`
     ip_address TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS founder_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    founder_id INTEGER NOT NULL,
+    question_key TEXT NOT NULL,
+    note_text TEXT NOT NULL DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (founder_id) REFERENCES founders(id),
+    UNIQUE(founder_id, question_key)
+  );
+
+  CREATE TABLE IF NOT EXISTS completions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    founder_id INTEGER NOT NULL,
+    model_id INTEGER,
+    finance_score INTEGER,
+    answers_total INTEGER DEFAULT 0,
+    answers_default INTEGER DEFAULT 0,
+    notes_count INTEGER DEFAULT 0,
+    founder_email_sent INTEGER DEFAULT 0,
+    admin_email_sent INTEGER DEFAULT 0,
+    completed_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (founder_id) REFERENCES founders(id)
+  );
 `);
 
 // Migrations
@@ -81,11 +106,11 @@ try { db.exec("ALTER TABLE financial_models ADD COLUMN confirmation_sent INTEGER
 console.log('✓ Database connected:', dbPath);
 
 // ─── Email ───────────────────────────────────────────────
+const EMAIL_USER = process.env.EMAIL_USER || 'becky@siliconbayou.ai';
+const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD || 'ltqnybjdaejcyhca';
+const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
 let transporter = null;
 try {
-  const EMAIL_USER = process.env.EMAIL_USER || 'becky@siliconbayou.ai';
-  const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD || 'ltqnybjdaejcyhca';
-  const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
   if (EMAIL_USER && EMAIL_PASSWORD) {
     const nodemailer = require('nodemailer');
     transporter = nodemailer.createTransport({
@@ -119,6 +144,25 @@ const BENCHMARKS = {
   pre_seed: { mrr_growth: 15, gross_margin: 70, churn: 6, cac: 200, acv: 2400, burn: 15000, team: 4, raise: 500000, valuation: 4000000 },
   seed:     { mrr_growth: 12, gross_margin: 72, churn: 5, cac: 350, acv: 6000, burn: 40000, team: 10, raise: 2000000, valuation: 10000000 },
   series_a: { mrr_growth: 10, gross_margin: 75, churn: 3, cac: 500, acv: 12000, burn: 100000, team: 25, raise: 8000000, valuation: 40000000 },
+};
+
+// Question labels for admin reports
+const QUESTION_MAP = {
+  '1_1':'Company Name','1_2':'Industry','1_3':'Customer Type','1_4':'What You Do','1_5':'Stage',
+  '1_6':'Team Size','1_7':'Co-Founders','1_8':'Location',
+  '2_9':'Revenue Model','2_10':'Monthly Price','2_11':'Pricing Tiers','2_12':'Current MRR',
+  '2_13':'Months to Revenue','2_14':'Customers (6mo)','2_15':'Customers (Y1)','2_16':'Customers (Y2)',
+  '2_17':'Customer Stickiness','2_18':'Expansion Revenue','2_19':'Revenue Concentration',
+  '3_20':'Acquisition Channel','3_21':'Marketing Budget','3_22':'Marketing Channels','3_23':'Sales Approach',
+  '3_24':'Sales Cycle','3_25':'CAC','3_26':'Ideal Customer','3_27':'Differentiator','3_28':'Competition',
+  '4_29':'Monthly Burn','4_30':'Cash in Bank','4_31':'Founder Salary','4_32':'When Paid',
+  '4_33':'Target Salary','4_34':'Y1 Hires','4_35':'Hire Roles','4_36':'Y2 Hires',
+  '4_37':'Avg Salary','4_38':'Contractors','4_39':'Hosting','4_40':'AI/API Costs',
+  '4_41':'Cost Scaling','4_42':'Tools','4_43':'Workspace','4_44':'Legal/Accounting',
+  '4_45':'Insurance','4_46':'Hardware/Hire','4_47':'Other Costs','4_48':'Cost Buffer %',
+  '5_49':'Money Raised','5_50':'Funding Sources','5_51':'Looking to Raise','5_52':'Target Raise',
+  '5_53':'Use of Funds','5_54':'Instrument','5_55':'Big Goal','5_56':'Exit Strategy',
+  '6_57':'Louisiana Ops','6_58':'Regulatory','6_59':'Other Notes'
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -180,7 +224,40 @@ app.get('/api/responses/:founder_id', (req, res) => {
   const rows = db.prepare('SELECT module_number, question_number, response_value, response_type FROM intake_responses WHERE founder_id = ?').all(req.params.founder_id);
   const responses = {};
   rows.forEach(r => { responses[`${r.module_number}_${r.question_number}`] = { value: r.response_value, type: r.response_type }; });
-  res.json({ responses });
+  // Also load notes
+  const noteRows = db.prepare('SELECT question_key, note_text FROM founder_notes WHERE founder_id = ?').all(req.params.founder_id);
+  const notes = {};
+  noteRows.forEach(n => { notes[n.question_key] = n.note_text; });
+  res.json({ responses, notes });
+});
+
+// POST /api/notes — Save a founder note for a question
+app.post('/api/notes', (req, res) => {
+  const { founder_id, question_key, note_text } = req.body;
+  if (!founder_id || !question_key) return res.status(400).json({ error: 'Missing fields' });
+  try {
+    if (!note_text || !note_text.trim()) {
+      db.prepare('DELETE FROM founder_notes WHERE founder_id = ? AND question_key = ?').run(founder_id, question_key);
+    } else {
+      db.prepare(`
+        INSERT INTO founder_notes (founder_id, question_key, note_text)
+        VALUES (?, ?, ?)
+        ON CONFLICT(founder_id, question_key)
+        DO UPDATE SET note_text=excluded.note_text, updated_at=datetime('now')
+      `).run(founder_id, question_key, note_text.trim());
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/notes/:founder_id — Get all notes
+app.get('/api/notes/:founder_id', (req, res) => {
+  const rows = db.prepare('SELECT question_key, note_text, updated_at FROM founder_notes WHERE founder_id = ?').all(req.params.founder_id);
+  const notes = {};
+  rows.forEach(r => { notes[r.question_key] = { text: r.note_text, updated_at: r.updated_at }; });
+  res.json({ notes });
 });
 
 // POST /api/generate-model/:founder_id — Generate 5-year financial model
@@ -189,23 +266,42 @@ app.post('/api/generate-model/:founder_id', (req, res) => {
   const founder = db.prepare('SELECT * FROM founders WHERE id = ?').get(fid);
   if (!founder) return res.status(404).json({ error: 'Founder not found' });
 
-  const rows = db.prepare('SELECT module_number, question_number, response_value FROM intake_responses WHERE founder_id = ?').all(fid);
+  const rows = db.prepare('SELECT module_number, question_number, response_value, response_type FROM intake_responses WHERE founder_id = ?').all(fid);
   const answers = {};
-  rows.forEach(r => { answers[`${r.module_number}_${r.question_number}`] = r.response_value; });
+  const responseTypes = {};
+  rows.forEach(r => {
+    const key = `${r.module_number}_${r.question_number}`;
+    answers[key] = r.response_value;
+    responseTypes[key] = r.response_type || 'founder_provided';
+  });
+
+  // Load notes for this founder
+  const noteRows = db.prepare('SELECT question_key, note_text FROM founder_notes WHERE founder_id = ?').all(fid);
+  const founderNotes = {};
+  noteRows.forEach(n => { founderNotes[n.question_key] = n.note_text; });
 
   try {
     const model = generateFinancialModel(founder, answers);
-    db.prepare(`
+    const modelResult = db.prepare(`
       INSERT INTO financial_models (founder_id, model_json, finance_score)
       VALUES (?, ?, ?)
     `).run(fid, JSON.stringify(model), model.finance_score?.score || 0);
 
-    db.prepare('INSERT INTO audit_log (action, detail) VALUES (?, ?)').run('MODEL_GENERATED', `${founder.company_name} (ID:${fid}) — Score: ${model.finance_score?.score || 0}/5`);
+    // Track completion
+    const answersTotal = Object.keys(answers).filter(k => answers[k] && answers[k].trim()).length;
+    const answersDefault = Object.keys(responseTypes).filter(k => responseTypes[k] === 'skipped_default').length;
+    const notesCount = noteRows.length;
+    db.prepare(`INSERT INTO completions (founder_id, model_id, finance_score, answers_total, answers_default, notes_count) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(fid, modelResult.lastInsertRowid, model.finance_score?.score || 0, answersTotal, answersDefault, notesCount);
+
+    db.prepare('INSERT INTO audit_log (action, detail) VALUES (?, ?)').run('MODEL_GENERATED', `${founder.company_name} (ID:${fid}) — Score: ${model.finance_score?.score || 0}/5 — ${answersTotal} answers (${answersDefault} defaults), ${notesCount} notes`);
 
     // Notify admin + send confirmation to founder
     if (transporter) {
-      sendAdminNotification(founder, model).catch(e => console.error('Admin email error:', e.message));
-      sendFounderConfirmation(founder, model).catch(e => console.error('Confirmation email error:', e.message));
+      sendAdminNotification(founder, model, responseTypes, founderNotes).catch(e => console.error('Admin email error:', e.message));
+      sendFounderReport(founder, model).catch(e => console.error('Founder report error:', e.message));
+      // Update completion record
+      db.prepare(`UPDATE completions SET founder_email_sent=1, admin_email_sent=1 WHERE model_id=?`).run(modelResult.lastInsertRowid);
     }
 
     res.json({ success: true, model });
@@ -264,6 +360,8 @@ app.get('/api/admin/founders', authenticateAdmin, (req, res) => {
   const founders = db.prepare(`
     SELECT f.*, 
       (SELECT COUNT(*) FROM intake_responses WHERE founder_id = f.id AND response_value != '') as answers_count,
+      (SELECT COUNT(*) FROM intake_responses WHERE founder_id = f.id AND response_type = 'skipped_default') as defaults_count,
+      (SELECT COUNT(*) FROM founder_notes WHERE founder_id = f.id) as notes_count,
       (SELECT MAX(finance_score) FROM financial_models WHERE founder_id = f.id) as latest_score,
       (SELECT generated_at FROM financial_models WHERE founder_id = f.id ORDER BY generated_at DESC LIMIT 1) as model_date
     FROM founders f ORDER BY f.updated_at DESC
@@ -276,7 +374,26 @@ app.get('/api/admin/founders/:id', authenticateAdmin, (req, res) => {
   if (!founder) return res.status(404).json({ error: 'Not found' });
   const responses = db.prepare('SELECT * FROM intake_responses WHERE founder_id = ? ORDER BY module_number, question_number').all(req.params.id);
   const models = db.prepare('SELECT id, finance_score, generated_at FROM financial_models WHERE founder_id = ? ORDER BY generated_at DESC').all(req.params.id);
-  res.json({ founder, responses, models });
+  const notes = db.prepare('SELECT question_key, note_text, updated_at FROM founder_notes WHERE founder_id = ?').all(req.params.id);
+  const completions = db.prepare('SELECT * FROM completions WHERE founder_id = ? ORDER BY completed_at DESC').all(req.params.id);
+  // Enrich responses with question labels and default flags
+  const enriched = responses.map(r => ({
+    ...r,
+    question_key: `${r.module_number}_${r.question_number}`,
+    question_label: QUESTION_MAP[`${r.module_number}_${r.question_number}`] || `Q${r.question_number}`,
+    is_default: r.response_type === 'skipped_default',
+  }));
+  res.json({ founder, responses: enriched, models, notes, completions, question_map: QUESTION_MAP });
+});
+
+app.get('/api/admin/completions', authenticateAdmin, (req, res) => {
+  const rows = db.prepare(`
+    SELECT c.*, f.name, f.email, f.company_name
+    FROM completions c
+    JOIN founders f ON f.id = c.founder_id
+    ORDER BY c.completed_at DESC LIMIT 100
+  `).all();
+  res.json({ completions: rows });
 });
 
 app.get('/api/admin/analytics', authenticateAdmin, (req, res) => {
@@ -657,100 +774,257 @@ function generateFinancialModel(founder, answers) {
   };
 }
 
-// ─── Admin Notification ──────────────────────────────────
-async function sendAdminNotification(founder, model) {
+// ─── Admin Notification (with defaults + notes) ─────────
+async function sendAdminNotification(founder, model, responseTypes, founderNotes) {
   if (!transporter) return;
   const score = model.finance_score?.score || 0;
   const scoreEmoji = score >= 4 ? '🟢' : score >= 3 ? '🟡' : '🔴';
+  responseTypes = responseTypes || {};
+  founderNotes = founderNotes || {};
+
+  // Build default answers section
+  const defaultKeys = Object.keys(responseTypes).filter(k => responseTypes[k] === 'skipped_default');
+  let defaultsHtml = '';
+  if (defaultKeys.length > 0) {
+    defaultsHtml = `<div style="margin-top:1rem;padding:1rem;background:#FFF3E0;border-left:3px solid #E65100;border-radius:0 6px 6px 0;">
+      <p style="margin:0 0 0.5rem;font-weight:700;color:#E65100;">⚠️ ${defaultKeys.length} Questions Used Default Answer</p>
+      <table style="width:100%;font-size:0.8rem;border-collapse:collapse;">
+        ${defaultKeys.map(k => `<tr><td style="padding:3px 0;color:#888;white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:3px 8px;font-weight:600;">${QUESTION_MAP[k] || k}</td><td style="padding:3px 0;color:#E65100;font-style:italic;">Used benchmark default</td></tr>`).join('')}
+      </table>
+    </div>`;
+  }
+
+  // Build notes section
+  const noteKeys = Object.keys(founderNotes).filter(k => founderNotes[k]);
+  let notesHtml = '';
+  if (noteKeys.length > 0) {
+    notesHtml = `<div style="margin-top:1rem;padding:1rem;background:#E3F2FD;border-left:3px solid #1565C0;border-radius:0 6px 6px 0;">
+      <p style="margin:0 0 0.5rem;font-weight:700;color:#1565C0;">📝 ${noteKeys.length} Founder Notes</p>
+      ${noteKeys.map(k => `<div style="margin-bottom:0.75rem;padding-bottom:0.5rem;border-bottom:1px solid #BBDEFB;">
+        <div style="font-size:0.7rem;color:#1565C0;font-weight:600;">${QUESTION_MAP[k] || k} (${k})</div>
+        <div style="font-size:0.85rem;color:#333;margin-top:0.15rem;white-space:pre-wrap;">${founderNotes[k]}</div>
+      </div>`).join('')}
+    </div>`;
+  }
+
+  // Build P&L summary
+  const pnl = model.five_year_pnl || [];
+  let pnlHtml = '';
+  if (pnl.length) {
+    pnlHtml = `<table style="width:100%;font-size:0.75rem;border-collapse:collapse;margin-top:0.5rem;">
+      <tr style="background:#f5f5f5;"><th style="padding:4px;text-align:left;">Year</th><th style="padding:4px;text-align:right;">Revenue</th><th style="padding:4px;text-align:right;">EBITDA</th><th style="padding:4px;text-align:right;">Customers</th></tr>
+      ${pnl.map(p => `<tr><td style="padding:3px 4px;">Y${p.year}</td><td style="padding:3px 4px;text-align:right;">$${(p.revenue||0).toLocaleString()}</td><td style="padding:3px 4px;text-align:right;color:${p.ebitda<0?'#9C4F38':'#4F5B45'};">$${(p.ebitda||0).toLocaleString()}</td><td style="padding:3px 4px;text-align:right;">${p.customers_end||'—'}</td></tr>`).join('')}
+    </table>`;
+  }
+
+  const ue = model.unit_economics || {};
+  const fs = model.funding_summary || {};
+
   await transporter.sendMail({
     from: EMAIL_USER,
     to: ADMIN_EMAIL,
-    subject: `📊 New Pro Forma Generated — ${founder.company_name} (Score: ${score}/5)`,
+    subject: `📊 Pro Forma Complete — ${founder.company_name} ${scoreEmoji} ${score}/5 ${defaultKeys.length > 0 ? `(${defaultKeys.length} defaults)` : ''} ${noteKeys.length > 0 ? `(${noteKeys.length} notes)` : ''}`,
     html: `
-      <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;color:#333;">
+      <div style="font-family:'Segoe UI',sans-serif;max-width:650px;margin:0 auto;color:#333;">
         <div style="background:#130702;padding:1.5rem;text-align:center;border-radius:8px 8px 0 0;">
-          <h2 style="color:#FDF4E2;margin:0;font-weight:300;">New Pro Forma Model</h2>
-          <p style="color:#B58A4B;margin-top:0.25rem;font-weight:600;">Silicon Bayou Holdings</p>
+          <h2 style="color:#FDF4E2;margin:0;font-weight:300;">Pro Forma Completion Report</h2>
+          <p style="color:#B58A4B;margin-top:0.25rem;font-weight:600;">Silicon Bayou Holdings · Admin Report</p>
         </div>
         <div style="padding:1.5rem;background:#fff;border:1px solid #C9B9A6;">
           <h3 style="color:#130702;margin-top:0;">${founder.company_name}</h3>
           <table style="width:100%;font-size:0.9rem;border-collapse:collapse;">
-            <tr><td style="padding:6px 0;color:#888;">Founder</td><td style="font-weight:600;">${founder.name} (${founder.email})</td></tr>
+            <tr><td style="padding:6px 0;color:#888;width:140px;">Founder</td><td style="font-weight:600;">${founder.name} (${founder.email})</td></tr>
             <tr><td style="padding:6px 0;color:#888;">Phase</td><td style="font-weight:600;">${founder.phase}</td></tr>
             <tr><td style="padding:6px 0;color:#888;">Vertical</td><td>${founder.vertical}</td></tr>
             <tr><td style="padding:6px 0;color:#888;">Finance Score</td><td style="font-weight:700;">${scoreEmoji} ${score}/5 — ${model.finance_score?.label}</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Y1 Revenue</td><td>$${(model.five_year_pnl[0]?.revenue||0).toLocaleString()}</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Y5 Revenue</td><td>$${(model.five_year_pnl[4]?.revenue||0).toLocaleString()}</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Break-Even</td><td>${model.funding_summary?.break_even_year ? 'Year '+model.funding_summary.break_even_year : 'Beyond Y5'}</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Gates Passed</td><td>${(model.finance_score?.gates_passed||[]).join(', ') || 'None'}</td></tr>
           </table>
+
+          <div style="margin-top:1rem;padding:0.75rem;background:#f9f9f9;border-radius:6px;">
+            <div style="display:flex;gap:1.5rem;flex-wrap:wrap;font-size:0.8rem;">
+              <div><strong style="color:#130702;">CAC:</strong> $${ue.cac||0}</div>
+              <div><strong>LTV:CAC:</strong> ${ue.ltv_cac_ratio||0}x</div>
+              <div><strong>Churn:</strong> ${ue.monthly_churn_pct||0}%/mo</div>
+              <div><strong>Raise:</strong> $${(fs.current_raise||0).toLocaleString()}</div>
+              <div><strong>Break-Even:</strong> ${fs.break_even_year ? 'Y'+fs.break_even_year : 'Beyond Y5'}</div>
+              <div><strong>Runway:</strong> ${fs.runway_current_months||0}mo</div>
+            </div>
+          </div>
+
+          ${pnlHtml}
+          ${defaultsHtml}
+          ${notesHtml}
+        </div>
+        <div style="text-align:center;padding:0.75rem;color:#959685;font-size:0.7rem;">
+          Generated: ${new Date().toISOString().replace('T',' ').slice(0,19)} UTC
         </div>
       </div>`
   });
   console.log('✓ Admin notification sent');
 }
 
-// ─── Founder Confirmation Email ──────────────────────────
-async function sendFounderConfirmation(founder, model) {
+// ─── Founder Report Email (score-driven, like hustler-to-ceo) ───
+async function sendFounderReport(founder, model) {
   if (!transporter) return;
   const score = model.finance_score?.score || 0;
   const scoreLabel = model.finance_score?.label || '';
-  const gatesPassed = model.finance_score?.gates_passed?.length || 0;
+  const gatesPassed = model.finance_score?.gates_passed || [];
   const totalGates = model.finance_score?.total_gates || 7;
-  const y5Rev = model.five_year_pnl?.[4]?.revenue || 0;
-  const breakEven = model.funding_summary?.break_even_year;
+  const gapAnalysis = model.finance_score?.gap_analysis || '';
+  const pnl = model.five_year_pnl || [];
+  const ue = model.unit_economics || {};
+  const fs = model.funding_summary || {};
+  const cash = model.cash_position || [];
   const siteUrl = process.env.SITE_URL || `http://localhost:${PORT}`;
+
+  const scoreColor = score >= 4 ? '#4F5B45' : score >= 3 ? '#B58A4B' : '#9C4F38';
+  const scoreBg = score >= 4 ? '#E8F5E9' : score >= 3 ? '#FDF4E2' : '#FFEBEE';
+
+  // Score-driven personalized insights
+  let personalizedSection = '';
+  if (score >= 4) {
+    personalizedSection = `
+      <div style="background:#E8F5E9;border-left:3px solid #4F5B45;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
+        <p style="margin:0;font-weight:700;color:#4F5B45;">🏆 Investor-Ready Model</p>
+        <p style="margin:0.25rem 0 0;font-size:0.85rem;">Your financials tell a compelling story. Your unit economics, growth trajectory, and cost structure are well-articulated. You're in a strong position to have productive conversations with investors.</p>
+      </div>
+      <h3 style="color:#130702;">Your 7-Day Action Plan</h3>
+      <ol style="font-size:0.9rem;line-height:1.9;">
+        <li><strong>Day 1-2:</strong> Review your dashboard and validate key assumptions with 2-3 potential customers</li>
+        <li><strong>Day 3-4:</strong> Build your pitch deck using these financials as the backbone</li>
+        <li><strong>Day 5-6:</strong> Identify 10 target investors and research their portfolio for fit</li>
+        <li><strong>Day 7:</strong> Schedule intro calls — or connect with SBH for warm introductions</li>
+      </ol>`;
+  } else if (score >= 3) {
+    personalizedSection = `
+      <div style="background:#FDF4E2;border-left:3px solid #B58A4B;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
+        <p style="margin:0;font-weight:700;color:#B58A4B;">📈 Developing — Getting Close</p>
+        <p style="margin:0.25rem 0 0;font-size:0.85rem;">Your model has a solid foundation but there are gaps that sophisticated investors will probe. Let's close them.</p>
+      </div>
+      <h3 style="color:#130702;">Your 14-Day Action Plan</h3>
+      <ol style="font-size:0.9rem;line-height:1.9;">
+        <li><strong>This week:</strong> Go back and replace any defaulted answers with your real numbers — even rough estimates beat benchmarks</li>
+        <li><strong>Focus area:</strong> ${gapAnalysis}</li>
+        <li><strong>Validate:</strong> Talk to 5 potential customers about pricing and willingness to pay</li>
+        <li><strong>Re-generate:</strong> Update your inputs and regenerate for an improved score</li>
+        <li><strong>Get help:</strong> SBH can walk through the gaps with you — often a 30-minute call is all it takes</li>
+      </ol>`;
+  } else {
+    personalizedSection = `
+      <div style="background:#FFEBEE;border-left:3px solid #9C4F38;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
+        <p style="margin:0;font-weight:700;color:#9C4F38;">🔧 Early Stage — Let's Build This Up</p>
+        <p style="margin:0.25rem 0 0;font-size:0.85rem;">You're at the beginning of your financial planning journey. That's exactly where many successful founders started. The important thing is you're doing this now.</p>
+      </div>
+      <h3 style="color:#130702;">Your 30-Day Action Plan</h3>
+      <ol style="font-size:0.9rem;line-height:1.9;">
+        <li><strong>Week 1:</strong> Complete all unanswered questions — even rough estimates help the model</li>
+        <li><strong>Week 2:</strong> Research your competitors' pricing and validate your price point</li>
+        <li><strong>Week 3:</strong> Talk to 10 potential customers — can you realistically hit your customer targets?</li>
+        <li><strong>Week 4:</strong> Re-generate your model with updated inputs and aim for 3+/5</li>
+        <li><strong>Shortcut:</strong> Book a session with SBH — we'll help you work through the financial planning in a structured way</li>
+      </ol>`;
+  }
+
+  // Build P&L table
+  let pnlTable = '';
+  if (pnl.length) {
+    pnlTable = `<table style="width:100%;font-size:0.8rem;border-collapse:collapse;margin:0.75rem 0;">
+      <tr style="background:#f5f5f5;"><th style="padding:5px;text-align:left;">Year</th><th style="padding:5px;text-align:right;">Revenue</th><th style="padding:5px;text-align:right;">EBITDA</th><th style="padding:5px;text-align:right;">Customers</th><th style="padding:5px;text-align:right;">Cash</th></tr>
+      ${pnl.map((p, i) => `<tr style="border-bottom:1px solid #eee;">
+        <td style="padding:4px 5px;font-weight:600;">Year ${p.year}</td>
+        <td style="padding:4px 5px;text-align:right;">$${(p.revenue||0).toLocaleString()}</td>
+        <td style="padding:4px 5px;text-align:right;color:${p.ebitda<0?'#9C4F38':'#4F5B45'};">$${(p.ebitda||0).toLocaleString()}</td>
+        <td style="padding:4px 5px;text-align:right;">${p.customers_end||'—'}</td>
+        <td style="padding:4px 5px;text-align:right;color:${(cash[i]?.cash_balance||0)<0?'#9C4F38':'#4F5B45'};">$${(cash[i]?.cash_balance||0).toLocaleString()}</td>
+      </tr>`).join('')}
+    </table>`;
+  }
+
+  // Cash warning
+  let cashWarning = '';
+  const negCashYear = cash.findIndex(c => c.cash_balance < 0);
+  if (negCashYear >= 0) {
+    cashWarning = `<div style="background:#FFF3E0;border-left:3px solid #E65100;padding:0.75rem;border-radius:0 6px 6px 0;margin:0.75rem 0;">
+      <p style="margin:0;font-size:0.85rem;"><strong>⚠️ Cash Warning:</strong> Your model shows cash going negative in Year ${negCashYear + 1}. This means you'll need additional funding beyond your current raise of $${(fs.current_raise||0).toLocaleString()}. Total funding needed: <strong>$${(fs.total_funding_needed||0).toLocaleString()}</strong>.</p>
+    </div>`;
+  }
 
   await transporter.sendMail({
     from: EMAIL_USER,
     to: founder.email,
-    subject: `📊 Your Pro Forma Model is Ready — ${founder.company_name} (Score: ${score}/5)`,
+    subject: `📊 Your Pro Forma Report — ${founder.company_name} (Score: ${score}/5)`,
     html: `
       <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;color:#333;">
-        <div style="background:#130702;padding:1.5rem;text-align:center;border-radius:8px 8px 0 0;">
-          <h2 style="color:#FDF4E2;margin:0;font-weight:300;">Your Financial Model is Ready</h2>
-          <p style="color:#B58A4B;margin-top:0.25rem;font-weight:600;">Silicon Bayou Holdings · AI SaaS Pro Forma</p>
+        <div style="background:#130702;padding:2rem;text-align:center;border-radius:8px 8px 0 0;">
+          <h1 style="color:#FDF4E2;margin:0;font-weight:300;font-size:1.6rem;">Your Financial Model Report</h1>
+          <p style="color:#B58A4B;margin:0.25rem 0 0;font-weight:600;">Silicon Bayou Holdings · AI SaaS Pro Forma</p>
+          <p style="color:#C9B9A6;margin:0.5rem 0 0;font-size:0.85rem;">${founder.company_name} · ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
         </div>
-        <div style="padding:1.5rem;background:#fff;border:1px solid #C9B9A6;">
-          <p>Hi ${founder.name},</p>
-          <p>Your 5-year financial model for <strong>${founder.company_name}</strong> has been generated. Here's your snapshot:</p>
 
-          <div style="background:#FDF4E2;border-radius:8px;padding:1rem;margin:1rem 0;text-align:center;">
-            <div style="font-size:2rem;font-weight:700;color:${score >= 4 ? '#4F5B45' : score >= 3 ? '#B58A4B' : '#9C4F38'};">${score}/5</div>
-            <div style="font-size:0.85rem;color:#676C5C;">Finance Score — ${scoreLabel}</div>
-            <div style="font-size:0.75rem;color:#959685;margin-top:0.25rem;">${gatesPassed}/${totalGates} quality gates passed</div>
+        <div style="padding:1.5rem;background:#fff;border:1px solid #C9B9A6;">
+          <p style="font-size:1rem;">Hi ${founder.name},</p>
+          <p>Your 5-year financial model for <strong>${founder.company_name}</strong> is ready. Here's your personalized report with actionable next steps.</p>
+
+          <!-- Score -->
+          <div style="background:${scoreBg};border-radius:12px;padding:1.25rem;margin:1.25rem 0;text-align:center;">
+            <div style="font-size:3rem;font-weight:700;color:${scoreColor};line-height:1;">${score}<span style="font-size:1.2rem;font-weight:400;">/5</span></div>
+            <div style="font-size:1rem;color:#333;font-weight:600;margin-top:0.25rem;">Finance Score: ${scoreLabel}</div>
+            <div style="font-size:0.8rem;color:#666;margin-top:0.25rem;">${gatesPassed.length}/${totalGates} quality gates passed</div>
+            <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0.3rem;margin-top:0.75rem;">
+              ${['Assumption Transparency','Revenue Plausibility','Unit Economics','Runway Integrity','Gross Margin','Headcount','Scenario Coverage'].map((g, i) => {
+                const full = ['Assumption Transparency','Revenue Plausibility','Unit Economics Viability','Runway Integrity','Gross Margin Credibility','Headcount Coherence','Scenario Coverage'][i];
+                const passed = gatesPassed.includes(full);
+                return `<span style="font-size:0.65rem;padding:0.15rem 0.4rem;border-radius:3px;background:${passed ? 'rgba(79,91,69,0.15)' : 'rgba(0,0,0,0.05)'};color:${passed ? '#4F5B45' : '#999'};">${passed ? '✓ ' : ''}${g}</span>`;
+              }).join('')}
+            </div>
           </div>
 
+          <!-- Key Metrics -->
+          <h3 style="color:#130702;margin-top:1.5rem;border-bottom:1px solid #eee;padding-bottom:0.5rem;">📊 Key Metrics</h3>
           <table style="width:100%;font-size:0.9rem;border-collapse:collapse;">
-            <tr><td style="padding:6px 0;color:#7D8C96;">Phase</td><td style="font-weight:600;">${founder.phase}</td></tr>
-            <tr><td style="padding:6px 0;color:#7D8C96;">Vertical</td><td>${founder.vertical}</td></tr>
-            <tr><td style="padding:6px 0;color:#7D8C96;">Year 5 Revenue</td><td style="font-weight:600;">$${y5Rev.toLocaleString()}</td></tr>
-            <tr><td style="padding:6px 0;color:#7D8C96;">Break-Even</td><td>${breakEven ? 'Year ' + breakEven : 'Beyond Year 5'}</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Monthly Price</td><td style="font-weight:600;">$${model.assumptions?.monthly_price || 99}</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Y1 Customers</td><td style="font-weight:600;">${model.assumptions?.customers_y1 || '—'}</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">CAC / LTV</td><td style="font-weight:600;">$${ue.cac||0} / $${(ue.ltv||0).toLocaleString()} (${ue.ltv_cac_ratio||0}x ratio)</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Monthly Churn</td><td style="font-weight:600;">${ue.monthly_churn_pct||0}%</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Gross Margin</td><td style="font-weight:600;">${ue.gross_margin||0}%</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Current Burn</td><td style="font-weight:600;">$${(fs.burn_rate_current||0).toLocaleString()}/mo</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Cash in Bank</td><td style="font-weight:600;">$${(fs.cash_in_bank||0).toLocaleString()}</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Current Runway</td><td style="font-weight:600;">${fs.runway_current_months||0} months</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Target Raise</td><td style="font-weight:600;">$${(fs.current_raise||0).toLocaleString()}</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Break-Even</td><td style="font-weight:600;">${fs.break_even_year ? 'Year ' + fs.break_even_year : 'Beyond Year 5'}</td></tr>
           </table>
 
+          <!-- P&L Summary -->
+          <h3 style="color:#130702;margin-top:1.5rem;border-bottom:1px solid #eee;padding-bottom:0.5rem;">📈 5-Year Projection</h3>
+          ${pnlTable}
+          ${cashWarning}
+
+          <!-- Personalized Action Plan -->
+          ${personalizedSection}
+
+          <!-- CTA -->
           <div style="text-align:center;margin:1.5rem 0;">
-            <a href="${siteUrl}/#report/${encodeURIComponent(founder.email)}" style="display:inline-block;background:#130702;color:#FDF4E2;padding:12px 32px;border-radius:6px;text-decoration:none;font-weight:600;">View Your Full Dashboard →</a>
+            <a href="${siteUrl}/#report/${encodeURIComponent(founder.email)}" style="display:inline-block;background:#130702;color:#FDF4E2;padding:14px 36px;border-radius:6px;text-decoration:none;font-weight:600;font-size:1rem;">View Your Full Dashboard →</a>
           </div>
 
-          <h3 style="color:#130702;margin-top:1.5rem;">What's Next?</h3>
-          <ol style="font-size:0.9rem;line-height:1.8;">
-            <li><strong>Review your dashboard</strong> — P&L, unit economics, cash runway, headcount</li>
-            <li><strong>Refine your inputs</strong> — update any questions to re-generate</li>
-            <li><strong>Share with the SBH team</strong> — we'll help optimize your model</li>
-          </ol>
-
-          <div style="background:#FDF4E2;border-left:3px solid #B58A4B;padding:1rem;border-radius:0 6px 6px 0;margin:1.5rem 0;">
-            <p style="margin:0;font-weight:600;color:#130702;">💡 Ready to build your fundraise strategy?</p>
-            <p style="margin:0.25rem 0 0;font-size:0.85rem;">Connect with Silicon Bayou Holdings for hands-on guidance, pitch prep, and investor introductions.</p>
-            <p style="margin:0.5rem 0 0;"><a href="https://siliconbayou.ai" style="color:#B58A4B;font-weight:600;">Schedule a call with SBH →</a></p>
+          <!-- SBH CTA -->
+          <div style="background:#130702;border-radius:8px;padding:1.25rem;margin:1.5rem 0;text-align:center;">
+            <h3 style="color:#FDF4E2;margin:0;">Ready for the next step?</h3>
+            <p style="color:#C9B9A6;font-size:0.85rem;margin:0.5rem 0;">Whether you're refining your model, building your pitch deck, or preparing for investor conversations — Silicon Bayou Holdings is here to help.</p>
+            <div style="margin-top:0.75rem;">
+              <a href="https://siliconbayou.ai" style="display:inline-block;background:#B58A4B;color:#FDF4E2;padding:10px 28px;border-radius:6px;text-decoration:none;font-weight:600;">Schedule a Call with SBH →</a>
+            </div>
+            <p style="color:#676C5C;font-size:0.75rem;margin:0.5rem 0 0;">Free 30-minute consultation · No obligation · For founders at every stage</p>
           </div>
         </div>
-        <div style="text-align:center;padding:1rem;color:#959685;font-size:0.75rem;">
+        <div style="text-align:center;padding:1rem;color:#959685;font-size:0.7rem;">
           Silicon Bayou Holdings · Confidential & Proprietary<br>
-          <em>Laissez les bons temps coder!</em>
+          <em>Laissez les bons temps coder!</em><br>
+          <a href="${siteUrl}/#report/${encodeURIComponent(founder.email)}" style="color:#B58A4B;">View Online</a> · <a href="mailto:becky@siliconbayou.ai" style="color:#B58A4B;">Contact Us</a>
         </div>
       </div>`
   });
-  console.log(`✓ Confirmation email sent to ${founder.email}`);
+  console.log(`✓ Founder report email sent to ${founder.email}`);
 }
 
 // ─── 7-Day Follow-Up Email ───────────────────────────────

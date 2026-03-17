@@ -177,7 +177,7 @@
   var API = '';
   var app = document.getElementById('app');
   var nav = document.getElementById('nav');
-  var state = { founder_id: null, email: null, name: null, company: null, responses: {}, page: 'start', currentModule: 1, currentQ: 0 };
+  var state = { founder_id: null, email: null, name: null, company: null, responses: {}, notes: {}, page: 'start', currentModule: 1, currentQ: 0 };
 
   // ─── Session Persistence ───
   function saveSession() {
@@ -479,6 +479,7 @@
           // Load existing responses
           fetch(API+'/api/responses/'+d.founder_id).then(function(r){return r.json();}).then(function(rd){
             Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
+            Object.keys(rd.notes||{}).forEach(function(k){state.notes[k]=rd.notes[k];});
             // Returning user with responses → go to home; new user → intake
             if(d.existing && Object.keys(rd.responses||{}).length > 2){
               location.hash='home'; route();
@@ -503,8 +504,9 @@
     ]).then(function(results){
       var rd = results[0];
       var md = results[1];
-      // Sync responses into state
+      // Sync responses + notes into state
       Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
+      Object.keys(rd.notes||{}).forEach(function(k){state.notes[k]=rd.notes[k];});
       var answered = getAnswered();
       var totalQ = 59;
       var pct = Math.round(answered/totalQ*100);
@@ -672,6 +674,16 @@
 
     if(curVal)h+='<div class="mono text-green" style="font-size:0.75rem;margin-bottom:0.75rem;">✓ Saved</div>';
 
+    // Notes section
+    var noteVal=state.notes[key]||'';
+    h+='<div style="margin:0.75rem 0;">';
+    h+='<button class="btn btn-outline btn-sm" id="noteToggle" style="width:100%;justify-content:center;gap:0.5rem;font-size:0.75rem;color:var(--marsh-olive);border-color:var(--pale-clay);">'+(noteVal?'📝 Edit Note':'📝 Add a Note')+(noteVal?' <span style="font-size:0.65rem;background:rgba(79,91,69,0.1);padding:0.1rem 0.4rem;border-radius:3px;margin-left:0.5rem;">has note</span>':'')+'</button>';
+    h+='<div id="notePanel" class="'+(noteVal?'':'hidden')+'" style="margin-top:0.5rem;padding:0.75rem;border:1px solid var(--pale-clay);border-radius:8px;background:rgba(181,138,75,0.04);">';
+    h+='<label class="input-label" style="font-size:0.7rem;color:var(--marsh-olive);">📝 Note for yourself or the SBH team</label>';
+    h+='<textarea class="input" id="noteInput" maxlength="1000" rows="3" placeholder="Ideas this question sparked, uncertainties, things to discuss with SBH..." style="font-size:0.82rem;resize:vertical;">'+esc(noteVal)+'</textarea>';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.35rem;"><span class="mono text-muted" style="font-size:0.6rem;" id="noteSaveStatus">'+(noteVal?'✓ Saved':'')+'</span><span class="mono text-muted" style="font-size:0.6rem;" id="noteCharCount">'+(noteVal.length||0)+'/1000</span></div>';
+    h+='</div></div>';
+
     h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.5rem;"><button class="btn btn-outline" id="prevBtn"'+(state.currentModule===1&&state.currentQ===0?' disabled':'')+'>← Previous</button><span class="mono text-muted no-print" style="font-size:0.75rem;">Auto-saved</span><button class="btn btn-dark" id="nextBtn">'+(state.currentModule===MODULES.length&&state.currentQ===mod.questions.length-1?'Generate Model →':'Next →')+'</button></div>';
 
     app.innerHTML=h;
@@ -717,6 +729,33 @@
       else{generateModel();return;}
       renderIntake();
     });}
+
+    // Note listeners
+    var noteToggle=document.getElementById('noteToggle');
+    var notePanel=document.getElementById('notePanel');
+    var noteInput=document.getElementById('noteInput');
+    if(noteToggle&&notePanel){
+      noteToggle.addEventListener('click',function(){
+        if(notePanel.classList.contains('hidden')){notePanel.classList.remove('hidden');if(noteInput)noteInput.focus();}
+        else{notePanel.classList.add('hidden');}
+      });
+    }
+    if(noteInput){
+      var noteSaveTimer=null;
+      noteInput.addEventListener('input',function(){
+        var cc=document.getElementById('noteCharCount');if(cc)cc.textContent=this.value.length+'/1000';
+        clearTimeout(noteSaveTimer);
+        var v=this.value;
+        var statusEl=document.getElementById('noteSaveStatus');
+        if(statusEl)statusEl.textContent='Saving...';
+        noteSaveTimer=setTimeout(function(){
+          state.notes[key]=v;
+          fetch(API+'/api/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({founder_id:state.founder_id,question_key:key,note_text:v})})
+          .then(function(){if(statusEl)statusEl.textContent=v.trim()?'✓ Saved':'';})
+          .catch(function(){if(statusEl)statusEl.textContent='Error saving';});
+        },1000);
+      });
+    }
 
     // Probe calculator listeners
     var probeToggle=document.getElementById('probeToggle');
@@ -1042,6 +1081,7 @@
   if(loadSession() && state.founder_id){
     fetch(API+'/api/responses/'+state.founder_id).then(function(r){return r.json();}).then(function(rd){
       Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
+      Object.keys(rd.notes||{}).forEach(function(k){state.notes[k]=rd.notes[k];});
       route();
     }).catch(function(){ route(); });
   } else {
