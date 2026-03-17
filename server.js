@@ -297,11 +297,18 @@ app.post('/api/generate-model/:founder_id', (req, res) => {
     db.prepare('INSERT INTO audit_log (action, detail) VALUES (?, ?)').run('MODEL_GENERATED', `${founder.company_name} (ID:${fid}) — Score: ${model.finance_score?.score || 0}/5 — ${answersTotal} answers (${answersDefault} defaults), ${notesCount} notes`);
 
     // Notify admin + send confirmation to founder
+    const modelId = modelResult.lastInsertRowid;
     if (transporter) {
-      sendAdminNotification(founder, model, responseTypes, founderNotes).catch(e => console.error('Admin email error:', e.message));
-      sendFounderReport(founder, model).catch(e => console.error('Founder report error:', e.message));
-      // Update completion record
-      db.prepare(`UPDATE completions SET founder_email_sent=1, admin_email_sent=1 WHERE model_id=?`).run(modelResult.lastInsertRowid);
+      console.log(`[EMAIL] Sending admin notification for ${founder.company_name} to ${ADMIN_EMAIL}...`);
+      sendAdminNotification(founder, model, responseTypes, founderNotes)
+        .then(() => { db.prepare(`UPDATE completions SET admin_email_sent=1 WHERE model_id=?`).run(modelId); })
+        .catch(e => console.error('[EMAIL] Admin email FAILED:', e.message, e.stack));
+      console.log(`[EMAIL] Sending founder report to ${founder.email}...`);
+      sendFounderReport(founder, model)
+        .then(() => { db.prepare(`UPDATE completions SET founder_email_sent=1 WHERE model_id=?`).run(modelId); })
+        .catch(e => console.error('[EMAIL] Founder report FAILED:', e.message, e.stack));
+    } else {
+      console.log('[EMAIL] ⚠️ No email transporter — emails NOT sent');
     }
 
     res.json({ success: true, model });
@@ -310,11 +317,29 @@ app.post('/api/generate-model/:founder_id', (req, res) => {
   }
 });
 
-// GET /api/model/:founder_id — Get latest model
+// GET /api/model/:founder_id — Get latest model (public — strips valuation)
 app.get('/api/model/:founder_id', (req, res) => {
   const row = db.prepare('SELECT * FROM financial_models WHERE founder_id = ? ORDER BY generated_at DESC LIMIT 1').get(req.params.founder_id);
   if (!row) return res.status(404).json({ error: 'No model generated yet' });
-  res.json({ model: JSON.parse(row.model_json), generated_at: row.generated_at });
+  const model = JSON.parse(row.model_json);
+  delete model._valuation; // Internal only — never expose to founder
+  res.json({ model, generated_at: row.generated_at });
+});
+
+// GET /api/admin/valuation/:founder_id — SBH-only valuation report
+app.get('/api/admin/valuation/:founder_id', authenticateAdmin, (req, res) => {
+  const row = db.prepare('SELECT * FROM financial_models WHERE founder_id = ? ORDER BY generated_at DESC LIMIT 1').get(req.params.founder_id);
+  if (!row) return res.status(404).json({ error: 'No model found' });
+  const founder = db.prepare('SELECT * FROM founders WHERE id = ?').get(req.params.founder_id);
+  const model = JSON.parse(row.model_json);
+  res.json({
+    founder: { name: founder.name, company: founder.company_name, phase: founder.phase, vertical: founder.vertical },
+    valuation: model._valuation || null,
+    gtm_strategy: model.gtm_strategy || null,
+    runway_analysis: model.runway_analysis || null,
+    unit_economics: model.unit_economics || null,
+    generated_at: row.generated_at,
+  });
 });
 
 // GET /api/report/:email — Public report access
@@ -331,11 +356,13 @@ app.get('/api/report/:email', (req, res) => {
   const totalQ = 55;
   const answered = responses.filter(r => r.response_value && r.response_value.trim()).length;
 
+  const parsedModel = model ? JSON.parse(model.model_json) : null;
+  if (parsedModel) delete parsedModel._valuation; // Internal only
   res.json({
     founder: { name: founder.name, company: founder.company_name, phase: founder.phase, vertical: founder.vertical, customer_type: founder.customer_type },
     intake_progress: { answered, total: totalQ, pct: Math.round(answered / totalQ * 100) },
     responses: answersMap,
-    model: model ? JSON.parse(model.model_json) : null,
+    model: parsedModel,
     generated_at: model?.generated_at
   });
 });
@@ -739,6 +766,216 @@ function generateFinancialModel(founder, answers) {
       'All quality gates passed — model is investor-ready.',
   };
 
+  // ─── GTM Strategy Analysis ───
+  const channelRaw = g('3_20', 'mix');
+  const salesApproachRaw = g('3_23', 'Founders sell');
+  const salesCycleRaw = g('3_24', '1-2 weeks');
+  const idealCustomerRaw = g('3_26', '');
+  const differentiatorRaw = g('3_27', '');
+  const competitionRaw = g('3_28', '');
+  const channelsListRaw = g('3_22', '');
+  const revenueModelRaw = g('2_9', 'Monthly subscription');
+  const customerTypeRaw = g('1_3', 'Small businesses');
+
+  // Classify GTM motion
+  let gtmMotion = 'product_led';
+  if (salesApproachRaw.toLowerCase().includes('outbound') || salesCycleRaw.includes('3-6') || salesCycleRaw.includes('6+')) gtmMotion = 'enterprise_sales';
+  else if (salesApproachRaw.toLowerCase().includes('founders sell')) gtmMotion = 'founder_led';
+  else if (channelRaw.toLowerCase().includes('self-serve') || channelRaw.toLowerCase().includes('sign up')) gtmMotion = 'product_led';
+  else if (channelRaw.toLowerCase().includes('mix')) gtmMotion = 'hybrid';
+
+  const gtmMotionLabels = {
+    product_led: 'Product-Led Growth (PLG)',
+    founder_led: 'Founder-Led Sales',
+    enterprise_sales: 'Enterprise Sales',
+    hybrid: 'Hybrid (PLG + Sales)',
+  };
+
+  // Sales cycle → months
+  const cycleMap = { 'Same day': 0, '1-2 weeks': 0.5, '1-2 months': 1.5, '2-3 months': 2.5, '3-6 months': 4.5, '6+': 9 };
+  let salesCycleMonths = 0.5;
+  for (const [k, v] of Object.entries(cycleMap)) { if (salesCycleRaw.includes(k)) { salesCycleMonths = v; break; } }
+
+  // Marketing efficiency
+  const marketingEfficiency = marketingBudget > 0 && cac > 0 ? Math.round(marketingBudget / cac) : 0; // customers/month from marketing spend
+  const cacPaybackMonths = cac > 0 && monthlyPrice > 0 ? Math.round(cac / (monthlyPrice * grossMargin)) : 0;
+
+  // GTM risks & recommendations
+  const gtmInsights = [];
+  if (cac > acv * 0.4) gtmInsights.push({ type: 'warning', text: `Your CAC ($${cac}) is ${Math.round(cac/acv*100)}% of your ACV ($${acv}). Healthy SaaS is under 25%. Consider lower-cost channels or higher pricing.` });
+  else gtmInsights.push({ type: 'strength', text: `Strong CAC/ACV ratio — you spend $${cac} to acquire a customer worth $${acv}/year.` });
+
+  if (monthlyChurn > 0.05) gtmInsights.push({ type: 'warning', text: `Monthly churn of ${(monthlyChurn*100).toFixed(1)}% means you lose ~${Math.round(annualChurn*100)}% of customers per year. This is a leaky bucket — fix retention before scaling acquisition.` });
+  else if (monthlyChurn <= 0.03) gtmInsights.push({ type: 'strength', text: `Low churn (${(monthlyChurn*100).toFixed(1)}%/mo) indicates strong product-market fit. This is a great foundation for growth.` });
+
+  if (salesCycleMonths > 3) gtmInsights.push({ type: 'warning', text: `Long sales cycle (${salesCycleRaw}) means delayed revenue. Plan for ${Math.ceil(salesCycleMonths)} months of marketing spend before seeing returns.` });
+
+  if (hasExpansion) gtmInsights.push({ type: 'strength', text: 'Expansion revenue is a powerful growth lever. Companies with net negative churn can grow even if new customer acquisition slows.' });
+
+  if (revenueRiskRaw.includes('anchor') || revenueRiskRaw.includes('large')) gtmInsights.push({ type: 'warning', text: 'Customer concentration risk: losing your largest customer could significantly impact revenue. Diversify early.' });
+
+  if (gtmMotion === 'founder_led') gtmInsights.push({ type: 'info', text: 'Founder-led sales works for your first 10-20 customers, but doesn\'t scale. Plan the transition to a hired sales team by Year 2.' });
+
+  const gtmStrategy = {
+    motion: gtmMotion,
+    motion_label: gtmMotionLabels[gtmMotion] || gtmMotion,
+    sales_cycle_months: salesCycleMonths,
+    marketing_efficiency_customers_per_month: marketingEfficiency,
+    cac_payback_months: cacPaybackMonths,
+    channels: channelsListRaw,
+    ideal_customer: idealCustomerRaw,
+    differentiator: differentiatorRaw,
+    competition: competitionRaw,
+    insights: gtmInsights,
+  };
+
+  // ─── Pre-Money Valuation (Internal / SBH Only) ───
+  // Multiple methods, triangulated
+  const valuations = {};
+  const y1Rev = pnl[0]?.revenue || 0;
+  const y2Rev = pnl[1]?.revenue || 0;
+  const y5Rev = pnl[4]?.revenue || 0;
+  const y1ARR = arrWaterfall[0]?.end_arr || 0;
+  const y2ARR = arrWaterfall[1]?.end_arr || 0;
+
+  // 1) Revenue Multiple Method (most common for SaaS)
+  // Pre-revenue: based on TAM, team, traction signals. With revenue: ARR × multiple
+  const revenueMultiples = {
+    idea: { low: 0, mid: 0, high: 0, basis: 'Pre-revenue — valued on team & TAM' },
+    pre_seed: { low: 8, mid: 15, high: 25, basis: 'Pre-Seed ARR multiples (2024 benchmarks)' },
+    seed: { low: 10, mid: 20, high: 40, basis: 'Seed ARR multiples (SaaStr 2024)' },
+    series_a: { low: 8, mid: 15, high: 30, basis: 'Series A ARR multiples (PitchBook 2024)' },
+  };
+  const rm = revenueMultiples[phase] || revenueMultiples.idea;
+  if (y1ARR > 0) {
+    valuations.revenue_multiple = {
+      method: 'Revenue Multiple (ARR × Multiple)',
+      basis_arr: y1ARR,
+      multiple_low: rm.low, multiple_mid: rm.mid, multiple_high: rm.high,
+      low: Math.round(y1ARR * rm.low),
+      mid: Math.round(y1ARR * rm.mid),
+      high: Math.round(y1ARR * rm.high),
+      source: rm.basis,
+    };
+  }
+
+  // 2) Scorecard Method (for pre-revenue / early stage)
+  // Based on Payne Scorecard — weighted scores vs comparable companies
+  const scorecardFactors = [];
+  // Team strength (0-150%)
+  const teamScore = teamSize >= 3 ? 125 : teamSize >= 2 ? 100 : 75;
+  scorecardFactors.push({ factor: 'Team Strength', weight: 0.30, score: teamScore, note: `${teamSize} people, ${coFounders} co-founders` });
+  // Market opportunity (0-150%)
+  const marketScore = bigGoal.includes('$100M') ? 150 : bigGoal.includes('$50M') ? 130 : bigGoal.includes('$5-10M') ? 100 : 80;
+  scorecardFactors.push({ factor: 'Market Opportunity', weight: 0.25, score: marketScore, note: `Goal: ${bigGoal.substring(0, 40)}` });
+  // Product/technology (0-150%)
+  const productScore = phase === 'series_a' ? 130 : phase === 'seed' ? 110 : currentMRR > 0 ? 100 : 70;
+  scorecardFactors.push({ factor: 'Product / Technology', weight: 0.15, score: productScore, note: `Phase: ${phase}` });
+  // Competitive advantage (0-150%)
+  const compScore = differentiatorRaw.length > 50 ? 110 : differentiatorRaw.length > 20 ? 100 : 80;
+  scorecardFactors.push({ factor: 'Competitive Advantage', weight: 0.10, score: compScore, note: differentiatorRaw.substring(0, 50) || 'Not articulated' });
+  // Sales/Marketing (0-150%)
+  const salesScore = cac > 0 && ltv / cac >= 3 ? 130 : ltv / cac >= 2 ? 110 : 90;
+  scorecardFactors.push({ factor: 'Sales & Marketing', weight: 0.10, score: salesScore, note: `LTV:CAC ${(ltv/cac).toFixed(1)}x` });
+  // Need for funding (0-150%)
+  const fundScore = targetRaise >= 500000 ? 110 : targetRaise >= 250000 ? 100 : 90;
+  scorecardFactors.push({ factor: 'Funding Need', weight: 0.10, score: fundScore, note: `Raising $${targetRaise.toLocaleString()}` });
+
+  const weightedAvg = scorecardFactors.reduce((sum, f) => sum + f.weight * f.score, 0);
+  // Base comparable valuation by stage
+  const stageBase = { idea: 1500000, pre_seed: 3000000, seed: 8000000, series_a: 25000000 };
+  const baseVal = stageBase[phase] || 2000000;
+  const scorecardVal = Math.round(baseVal * weightedAvg / 100);
+  valuations.scorecard = {
+    method: 'Scorecard Method (Payne)',
+    factors: scorecardFactors,
+    weighted_score: Math.round(weightedAvg),
+    base_comparable: baseVal,
+    valuation: scorecardVal,
+    source: 'Comparable early-stage SaaS companies in same vertical & geography',
+  };
+
+  // 3) Berkus Method (for pre-revenue)
+  const berkusFactors = [
+    { factor: 'Sound Idea', value: differentiatorRaw.length > 20 ? 500000 : 250000 },
+    { factor: 'Prototype / MVP', value: phase === 'idea' ? 0 : phase === 'pre_seed' ? 250000 : 500000 },
+    { factor: 'Quality Team', value: teamSize >= 3 ? 500000 : teamSize >= 2 ? 350000 : 200000 },
+    { factor: 'Strategic Relationships', value: moneyRaisedSoFar > 0 ? 300000 : 100000 },
+    { factor: 'Product Rollout / Sales', value: currentMRR > 0 ? 500000 : customersEndY1 > 10 ? 300000 : 100000 },
+  ];
+  const berkusTotal = berkusFactors.reduce((s, f) => s + f.value, 0);
+  valuations.berkus = {
+    method: 'Berkus Method',
+    factors: berkusFactors,
+    valuation: berkusTotal,
+    source: 'Dave Berkus framework — each factor capped at $500K for pre-revenue companies',
+  };
+
+  // 4) Venture Capital Method (based on exit value)
+  const exitMultiple = phase === 'series_a' ? 8 : phase === 'seed' ? 10 : 12;
+  const expectedExit = y5Rev * exitMultiple;
+  const targetReturn = phase === 'series_a' ? 10 : phase === 'seed' ? 20 : 30; // VC expected return multiple
+  const vcPostMoney = expectedExit > 0 ? Math.round(expectedExit / targetReturn) : 0;
+  const vcPreMoney = Math.max(0, vcPostMoney - targetRaise);
+  valuations.vc_method = {
+    method: 'Venture Capital Method',
+    y5_revenue: y5Rev,
+    exit_multiple: exitMultiple,
+    expected_exit_value: Math.round(expectedExit),
+    target_return: targetReturn + 'x',
+    post_money: vcPostMoney,
+    pre_money: vcPreMoney,
+    source: `Y5 Revenue × ${exitMultiple}x exit multiple ÷ ${targetReturn}x target return`,
+  };
+
+  // Triangulated estimate
+  const allVals = [scorecardVal, berkusTotal, vcPreMoney].filter(v => v > 0);
+  if (valuations.revenue_multiple) allVals.push(valuations.revenue_multiple.mid);
+  const avgValuation = allVals.length > 0 ? Math.round(allVals.reduce((s, v) => s + v, 0) / allVals.length) : 0;
+
+  // Implied dilution
+  const postMoney = avgValuation + targetRaise;
+  const dilutionPct = postMoney > 0 ? +(targetRaise / postMoney * 100).toFixed(1) : 0;
+
+  const valuationSummary = {
+    methods: valuations,
+    triangulated_pre_money: avgValuation,
+    target_raise: targetRaise,
+    implied_post_money: postMoney,
+    implied_dilution_pct: dilutionPct,
+    confidence: score >= 4 ? 'High' : score >= 3 ? 'Medium' : 'Low',
+    confidence_note: score >= 4 ? 'Model is well-supported — valuation has strong basis' : score >= 3 ? 'Valuation is directional — some assumptions need validation' : 'Early-stage estimate only — refine model inputs for better accuracy',
+    _internal: true, // Flag: this is SBH-only data
+  };
+
+  // ─── Runway Analysis (educational) ───
+  const currentRunwayMonths = currentBurn > 0 ? Math.round(cashInBank / currentBurn) : 60;
+  const postRaiseRunway = currentBurn > 0 ? Math.round((cashInBank + targetRaise) / currentBurn) : 60;
+  const burnAccelerates = pnl[0]?.total_opex > currentBurn * 12 * 1.2;
+  const runwayAnalysis = {
+    current_cash: cashInBank,
+    current_burn: currentBurn,
+    current_runway_months: currentRunwayMonths,
+    post_raise_cash: cashInBank + targetRaise,
+    post_raise_runway_months: postRaiseRunway,
+    burn_accelerates: burnAccelerates,
+    explanation: currentRunwayMonths < 6
+      ? `⚠️ Critical: At $${currentBurn.toLocaleString()}/mo burn, you have ${currentRunwayMonths} months of cash. You need funding now.`
+      : currentRunwayMonths < 12
+        ? `⚠️ Caution: ${currentRunwayMonths} months of runway. Start fundraising immediately — it typically takes 3-6 months to close.`
+        : currentRunwayMonths < 18
+          ? `Adequate: ${currentRunwayMonths} months gives you time, but begin fundraising conversations within 6 months.`
+          : `Strong: ${currentRunwayMonths}+ months of runway. Focus on hitting milestones before raising.`,
+    post_raise_explanation: `With your $${targetRaise.toLocaleString()} raise, you'll have ~${postRaiseRunway} months at current burn. ${burnAccelerates ? 'Note: your hiring plan accelerates burn — actual runway will be shorter.' : ''}`,
+    milestones_before_next_raise: [],
+  };
+  // Add milestone recommendations
+  if (currentMRR === 0) runwayAnalysis.milestones_before_next_raise.push('Get to first paying customer');
+  if (customersEndY1 > 0) runwayAnalysis.milestones_before_next_raise.push(`Hit ${customersEndY1} customers (proves demand)`);
+  if (y1ARR > 0) runwayAnalysis.milestones_before_next_raise.push(`Reach $${Math.round(y1ARR/1000)}K ARR`);
+  runwayAnalysis.milestones_before_next_raise.push('Demonstrate product-market fit signals');
+  if (ltv / cac >= 3) runwayAnalysis.milestones_before_next_raise.push(`Maintain LTV:CAC above 3x (currently ${(ltv/cac).toFixed(1)}x)`);
+
   return {
     company_name: companyName,
     phase: founder.phase,
@@ -751,6 +988,9 @@ function generateFinancialModel(founder, answers) {
     unit_economics: unitEconomics,
     funding_summary: fundingSummary,
     finance_score: financeScore,
+    gtm_strategy: gtmStrategy,
+    runway_analysis: runwayAnalysis,
+    _valuation: valuationSummary, // Prefixed with _ to signal internal-only
     assumptions: {
       monthly_price: monthlyPrice,
       customers_y1: customersEndY1,
@@ -820,15 +1060,47 @@ async function sendAdminNotification(founder, model, responseTypes, founderNotes
   const ue = model.unit_economics || {};
   const fs = model.funding_summary || {};
 
+  // Build valuation section (admin only)
+  const val = model._valuation || {};
+  const gtm = model.gtm_strategy || {};
+  const runway = model.runway_analysis || {};
+  let valHtml = '';
+  if (val.triangulated_pre_money > 0) {
+    const methods = val.methods || {};
+    valHtml = `<div style="margin-top:1rem;padding:1rem;background:#F3E5F5;border-left:3px solid #7B1FA2;border-radius:0 6px 6px 0;">
+      <p style="margin:0 0 0.5rem;font-weight:700;color:#7B1FA2;">🏷️ Pre-Money Valuation Estimate (SBH Internal)</p>
+      <div style="font-size:1.5rem;font-weight:700;color:#4A148C;margin:0.25rem 0;">$${val.triangulated_pre_money.toLocaleString()}</div>
+      <div style="font-size:0.75rem;color:#666;margin-bottom:0.5rem;">Triangulated from ${Object.keys(methods).length} methods · Confidence: ${val.confidence} · Dilution: ${val.implied_dilution_pct}% for $${val.target_raise?.toLocaleString()}</div>
+      <table style="width:100%;font-size:0.75rem;border-collapse:collapse;">
+        ${methods.revenue_multiple ? `<tr><td style="padding:3px 0;color:#888;">Revenue Multiple</td><td>$${methods.revenue_multiple.low.toLocaleString()} – $${methods.revenue_multiple.high.toLocaleString()}</td></tr>` : ''}
+        ${methods.scorecard ? `<tr><td style="padding:3px 0;color:#888;">Scorecard (Payne)</td><td>$${methods.scorecard.valuation.toLocaleString()} (weighted: ${methods.scorecard.weighted_score}%)</td></tr>` : ''}
+        ${methods.berkus ? `<tr><td style="padding:3px 0;color:#888;">Berkus Method</td><td>$${methods.berkus.valuation.toLocaleString()}</td></tr>` : ''}
+        ${methods.vc_method ? `<tr><td style="padding:3px 0;color:#888;">VC Method</td><td>$${methods.vc_method.pre_money.toLocaleString()} (${methods.vc_method.target_return} return on $${methods.vc_method.expected_exit_value.toLocaleString()} exit)</td></tr>` : ''}
+      </table>
+    </div>`;
+  }
+
+  // GTM section
+  let gtmHtml = '';
+  if (gtm.motion) {
+    gtmHtml = `<div style="margin-top:1rem;padding:1rem;background:#E8F5E9;border-left:3px solid #2E7D32;border-radius:0 6px 6px 0;">
+      <p style="margin:0 0 0.5rem;font-weight:700;color:#2E7D32;">🚀 GTM Strategy: ${gtm.motion_label}</p>
+      <div style="font-size:0.8rem;">
+        <div><strong>Sales Cycle:</strong> ${gtm.sales_cycle_months}mo · <strong>CAC Payback:</strong> ${gtm.cac_payback_months}mo · <strong>Mkt Efficiency:</strong> ~${gtm.marketing_efficiency_customers_per_month} customers/mo</div>
+        ${(gtm.insights || []).map(i => `<div style="margin-top:0.4rem;padding:0.3rem 0.5rem;background:${i.type==='warning'?'#FFF3E0':i.type==='strength'?'#E8F5E9':'#F5F5F5'};border-radius:4px;font-size:0.75rem;">${i.type==='warning'?'⚠️':i.type==='strength'?'✅':'💡'} ${i.text}</div>`).join('')}
+      </div>
+    </div>`;
+  }
+
   await transporter.sendMail({
     from: EMAIL_USER,
     to: ADMIN_EMAIL,
-    subject: `📊 Pro Forma Complete — ${founder.company_name} ${scoreEmoji} ${score}/5 ${defaultKeys.length > 0 ? `(${defaultKeys.length} defaults)` : ''} ${noteKeys.length > 0 ? `(${noteKeys.length} notes)` : ''}`,
+    subject: `📊 Pro Forma Complete — ${founder.company_name} ${scoreEmoji} ${score}/5 | Val: $${val.triangulated_pre_money ? (val.triangulated_pre_money/1e6).toFixed(1)+'M' : 'N/A'} ${defaultKeys.length > 0 ? `| ${defaultKeys.length} defaults` : ''} ${noteKeys.length > 0 ? `| ${noteKeys.length} notes` : ''}`,
     html: `
-      <div style="font-family:'Segoe UI',sans-serif;max-width:650px;margin:0 auto;color:#333;">
+      <div style="font-family:'Segoe UI',sans-serif;max-width:680px;margin:0 auto;color:#333;">
         <div style="background:#130702;padding:1.5rem;text-align:center;border-radius:8px 8px 0 0;">
-          <h2 style="color:#FDF4E2;margin:0;font-weight:300;">Pro Forma Completion Report</h2>
-          <p style="color:#B58A4B;margin-top:0.25rem;font-weight:600;">Silicon Bayou Holdings · Admin Report</p>
+          <h2 style="color:#FDF4E2;margin:0;font-weight:300;letter-spacing:2px;">SILICON BAYOU HOLDINGS</h2>
+          <p style="color:#B58A4B;margin:0.25rem 0 0;font-weight:600;">Pro Forma Completion Report · Admin View</p>
         </div>
         <div style="padding:1.5rem;background:#fff;border:1px solid #C9B9A6;">
           <h3 style="color:#130702;margin-top:0;">${founder.company_name}</h3>
@@ -838,6 +1110,7 @@ async function sendAdminNotification(founder, model, responseTypes, founderNotes
             <tr><td style="padding:6px 0;color:#888;">Vertical</td><td>${founder.vertical}</td></tr>
             <tr><td style="padding:6px 0;color:#888;">Finance Score</td><td style="font-weight:700;">${scoreEmoji} ${score}/5 — ${model.finance_score?.label}</td></tr>
             <tr><td style="padding:6px 0;color:#888;">Gates Passed</td><td>${(model.finance_score?.gates_passed||[]).join(', ') || 'None'}</td></tr>
+            <tr><td style="padding:6px 0;color:#888;">Runway</td><td>${runway.current_runway_months || '?'}mo current → ${runway.post_raise_runway_months || '?'}mo post-raise</td></tr>
           </table>
 
           <div style="margin-top:1rem;padding:0.75rem;background:#f9f9f9;border-radius:6px;">
@@ -847,23 +1120,24 @@ async function sendAdminNotification(founder, model, responseTypes, founderNotes
               <div><strong>Churn:</strong> ${ue.monthly_churn_pct||0}%/mo</div>
               <div><strong>Raise:</strong> $${(fs.current_raise||0).toLocaleString()}</div>
               <div><strong>Break-Even:</strong> ${fs.break_even_year ? 'Y'+fs.break_even_year : 'Beyond Y5'}</div>
-              <div><strong>Runway:</strong> ${fs.runway_current_months||0}mo</div>
             </div>
           </div>
 
           ${pnlHtml}
+          ${valHtml}
+          ${gtmHtml}
           ${defaultsHtml}
           ${notesHtml}
         </div>
         <div style="text-align:center;padding:0.75rem;color:#959685;font-size:0.7rem;">
-          Generated: ${new Date().toISOString().replace('T',' ').slice(0,19)} UTC
+          Silicon Bayou Holdings · Confidential<br>Generated: ${new Date().toISOString().replace('T',' ').slice(0,19)} UTC
         </div>
       </div>`
   });
   console.log('✓ Admin notification sent');
 }
 
-// ─── Founder Report Email (score-driven, like hustler-to-ceo) ───
+// ─── Founder Report Email — SBH Branded, Educational, Score-Driven ───
 async function sendFounderReport(founder, model) {
   if (!transporter) return;
   const score = model.finance_score?.score || 0;
@@ -875,152 +1149,244 @@ async function sendFounderReport(founder, model) {
   const ue = model.unit_economics || {};
   const fs = model.funding_summary || {};
   const cash = model.cash_position || [];
+  const gtm = model.gtm_strategy || {};
+  const runway = model.runway_analysis || {};
+  const arr = model.arr_waterfall || [];
+  const headcount = model.headcount_summary || [];
   const siteUrl = process.env.SITE_URL || `http://localhost:${PORT}`;
 
   const scoreColor = score >= 4 ? '#4F5B45' : score >= 3 ? '#B58A4B' : '#9C4F38';
   const scoreBg = score >= 4 ? '#E8F5E9' : score >= 3 ? '#FDF4E2' : '#FFEBEE';
 
-  // Score-driven personalized insights
-  let personalizedSection = '';
-  if (score >= 4) {
-    personalizedSection = `
-      <div style="background:#E8F5E9;border-left:3px solid #4F5B45;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
-        <p style="margin:0;font-weight:700;color:#4F5B45;">🏆 Investor-Ready Model</p>
-        <p style="margin:0.25rem 0 0;font-size:0.85rem;">Your financials tell a compelling story. Your unit economics, growth trajectory, and cost structure are well-articulated. You're in a strong position to have productive conversations with investors.</p>
-      </div>
-      <h3 style="color:#130702;">Your 7-Day Action Plan</h3>
-      <ol style="font-size:0.9rem;line-height:1.9;">
-        <li><strong>Day 1-2:</strong> Review your dashboard and validate key assumptions with 2-3 potential customers</li>
-        <li><strong>Day 3-4:</strong> Build your pitch deck using these financials as the backbone</li>
-        <li><strong>Day 5-6:</strong> Identify 10 target investors and research their portfolio for fit</li>
-        <li><strong>Day 7:</strong> Schedule intro calls — or connect with SBH for warm introductions</li>
-      </ol>`;
-  } else if (score >= 3) {
-    personalizedSection = `
-      <div style="background:#FDF4E2;border-left:3px solid #B58A4B;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
-        <p style="margin:0;font-weight:700;color:#B58A4B;">📈 Developing — Getting Close</p>
-        <p style="margin:0.25rem 0 0;font-size:0.85rem;">Your model has a solid foundation but there are gaps that sophisticated investors will probe. Let's close them.</p>
-      </div>
-      <h3 style="color:#130702;">Your 14-Day Action Plan</h3>
-      <ol style="font-size:0.9rem;line-height:1.9;">
-        <li><strong>This week:</strong> Go back and replace any defaulted answers with your real numbers — even rough estimates beat benchmarks</li>
-        <li><strong>Focus area:</strong> ${gapAnalysis}</li>
-        <li><strong>Validate:</strong> Talk to 5 potential customers about pricing and willingness to pay</li>
-        <li><strong>Re-generate:</strong> Update your inputs and regenerate for an improved score</li>
-        <li><strong>Get help:</strong> SBH can walk through the gaps with you — often a 30-minute call is all it takes</li>
-      </ol>`;
-  } else {
-    personalizedSection = `
-      <div style="background:#FFEBEE;border-left:3px solid #9C4F38;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
-        <p style="margin:0;font-weight:700;color:#9C4F38;">🔧 Early Stage — Let's Build This Up</p>
-        <p style="margin:0.25rem 0 0;font-size:0.85rem;">You're at the beginning of your financial planning journey. That's exactly where many successful founders started. The important thing is you're doing this now.</p>
-      </div>
-      <h3 style="color:#130702;">Your 30-Day Action Plan</h3>
-      <ol style="font-size:0.9rem;line-height:1.9;">
-        <li><strong>Week 1:</strong> Complete all unanswered questions — even rough estimates help the model</li>
-        <li><strong>Week 2:</strong> Research your competitors' pricing and validate your price point</li>
-        <li><strong>Week 3:</strong> Talk to 10 potential customers — can you realistically hit your customer targets?</li>
-        <li><strong>Week 4:</strong> Re-generate your model with updated inputs and aim for 3+/5</li>
-        <li><strong>Shortcut:</strong> Book a session with SBH — we'll help you work through the financial planning in a structured way</li>
-      </ol>`;
-  }
+  // Helper for email-safe formatting
+  const ef = (n) => { n = Number(n) || 0; if (Math.abs(n) >= 1e6) return '$' + (n/1e6).toFixed(1) + 'M'; if (Math.abs(n) >= 1e3) return '$' + Math.round(n/1e3) + 'K'; return '$' + n.toLocaleString(); };
 
-  // Build P&L table
+  // P&L table
   let pnlTable = '';
   if (pnl.length) {
-    pnlTable = `<table style="width:100%;font-size:0.8rem;border-collapse:collapse;margin:0.75rem 0;">
-      <tr style="background:#f5f5f5;"><th style="padding:5px;text-align:left;">Year</th><th style="padding:5px;text-align:right;">Revenue</th><th style="padding:5px;text-align:right;">EBITDA</th><th style="padding:5px;text-align:right;">Customers</th><th style="padding:5px;text-align:right;">Cash</th></tr>
-      ${pnl.map((p, i) => `<tr style="border-bottom:1px solid #eee;">
-        <td style="padding:4px 5px;font-weight:600;">Year ${p.year}</td>
-        <td style="padding:4px 5px;text-align:right;">$${(p.revenue||0).toLocaleString()}</td>
-        <td style="padding:4px 5px;text-align:right;color:${p.ebitda<0?'#9C4F38':'#4F5B45'};">$${(p.ebitda||0).toLocaleString()}</td>
-        <td style="padding:4px 5px;text-align:right;">${p.customers_end||'—'}</td>
-        <td style="padding:4px 5px;text-align:right;color:${(cash[i]?.cash_balance||0)<0?'#9C4F38':'#4F5B45'};">$${(cash[i]?.cash_balance||0).toLocaleString()}</td>
-      </tr>`).join('')}
+    pnlTable = `<table style="width:100%;font-size:0.78rem;border-collapse:collapse;margin:0.5rem 0;">
+      <tr style="background:#f5f5f5;"><th style="padding:5px;text-align:left;font-size:0.7rem;">YEAR</th>${pnl.map(p => `<th style="padding:5px;text-align:right;font-size:0.7rem;">Y${p.year}</th>`).join('')}</tr>
+      <tr><td style="padding:4px 5px;color:#888;">Revenue</td>${pnl.map(p => `<td style="padding:4px 5px;text-align:right;font-weight:600;">${ef(p.revenue)}</td>`).join('')}</tr>
+      <tr><td style="padding:4px 5px;color:#888;">Gross Profit</td>${pnl.map(p => `<td style="padding:4px 5px;text-align:right;">${ef(p.gross_profit)}</td>`).join('')}</tr>
+      <tr style="background:#f9f9f9;"><td style="padding:4px 5px;color:#888;font-weight:600;">EBITDA</td>${pnl.map(p => `<td style="padding:4px 5px;text-align:right;font-weight:600;color:${p.ebitda<0?'#9C4F38':'#4F5B45'};">${ef(p.ebitda)}</td>`).join('')}</tr>
+      <tr><td style="padding:4px 5px;color:#888;">Customers</td>${pnl.map(p => `<td style="padding:4px 5px;text-align:right;">${p.customers_end||'—'}</td>`).join('')}</tr>
+      <tr><td style="padding:4px 5px;color:#888;">Team Size</td>${headcount.map(h => `<td style="padding:4px 5px;text-align:right;">${h.total}</td>`).join('')}</tr>
+      <tr style="background:#f9f9f9;"><td style="padding:4px 5px;color:#888;font-weight:600;">Cash</td>${cash.map(c => `<td style="padding:4px 5px;text-align:right;font-weight:600;color:${c.cash_balance<0?'#9C4F38':'#4F5B45'};">${ef(c.cash_balance)}</td>`).join('')}</tr>
     </table>`;
   }
 
-  // Cash warning
+  // Cash/Runway warning
   let cashWarning = '';
   const negCashYear = cash.findIndex(c => c.cash_balance < 0);
   if (negCashYear >= 0) {
     cashWarning = `<div style="background:#FFF3E0;border-left:3px solid #E65100;padding:0.75rem;border-radius:0 6px 6px 0;margin:0.75rem 0;">
-      <p style="margin:0;font-size:0.85rem;"><strong>⚠️ Cash Warning:</strong> Your model shows cash going negative in Year ${negCashYear + 1}. This means you'll need additional funding beyond your current raise of $${(fs.current_raise||0).toLocaleString()}. Total funding needed: <strong>$${(fs.total_funding_needed||0).toLocaleString()}</strong>.</p>
+      <p style="margin:0;font-size:0.85rem;"><strong>⚠️ Cash Warning:</strong> Your model shows cash going negative in Year ${negCashYear + 1}. This means you'll need additional funding beyond your current raise of ${ef(fs.current_raise)}. Total estimated funding needed: <strong>${ef(fs.total_funding_needed)}</strong>.</p>
     </div>`;
   }
 
+  // Score-driven personalized action plan
+  let actionPlan = '';
+  if (score >= 4) {
+    actionPlan = `
+      <div style="background:#E8F5E9;border-left:3px solid #4F5B45;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
+        <p style="margin:0;font-weight:700;color:#4F5B45;">🏆 Investor-Ready Model</p>
+        <p style="margin:0.25rem 0 0;font-size:0.85rem;">Your financials tell a compelling story. You're in a strong position for investor conversations.</p>
+      </div>
+      <h3 style="color:#130702;font-size:0.95rem;">Your 7-Day Action Plan</h3>
+      <ol style="font-size:0.85rem;line-height:1.9;">
+        <li><strong>Day 1-2:</strong> Review your full dashboard — validate key assumptions with 2-3 potential customers</li>
+        <li><strong>Day 3-4:</strong> Build your pitch deck using these financials as the backbone</li>
+        <li><strong>Day 5-6:</strong> Identify 10 target investors and research their portfolio for fit</li>
+        <li><strong>Day 7:</strong> Connect with SBH for warm investor introductions</li>
+      </ol>`;
+  } else if (score >= 3) {
+    actionPlan = `
+      <div style="background:#FDF4E2;border-left:3px solid #B58A4B;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
+        <p style="margin:0;font-weight:700;color:#B58A4B;">📈 Getting Close — Gaps to Address</p>
+        <p style="margin:0.25rem 0 0;font-size:0.85rem;">Solid foundation, but sophisticated investors will probe the gaps. Let's close them.</p>
+      </div>
+      <h3 style="color:#130702;font-size:0.95rem;">Your 14-Day Action Plan</h3>
+      <ol style="font-size:0.85rem;line-height:1.9;">
+        <li><strong>This week:</strong> Replace any defaulted answers with your real numbers</li>
+        <li><strong>Focus:</strong> ${gapAnalysis}</li>
+        <li><strong>Validate:</strong> Talk to 5 potential customers about pricing and willingness to pay</li>
+        <li><strong>Re-generate:</strong> Update inputs and regenerate for an improved score</li>
+        <li><strong>Accelerate:</strong> Book a 30-minute call with SBH — we'll walk through the gaps together</li>
+      </ol>`;
+  } else {
+    actionPlan = `
+      <div style="background:#FFEBEE;border-left:3px solid #9C4F38;padding:1rem;border-radius:0 6px 6px 0;margin:1rem 0;">
+        <p style="margin:0;font-weight:700;color:#9C4F38;">🔧 Early Stage — Let's Build This Up</p>
+        <p style="margin:0.25rem 0 0;font-size:0.85rem;">You're at the starting line — and that's exactly where many successful founders began. The key is turning this rough model into a clear plan.</p>
+      </div>
+      <h3 style="color:#130702;font-size:0.95rem;">Your 30-Day Action Plan</h3>
+      <ol style="font-size:0.85rem;line-height:1.9;">
+        <li><strong>Week 1:</strong> Complete all unanswered questions — rough estimates beat benchmarks</li>
+        <li><strong>Week 2:</strong> Research competitor pricing and validate your price point</li>
+        <li><strong>Week 3:</strong> Talk to 10 potential customers — can you hit your targets?</li>
+        <li><strong>Week 4:</strong> Regenerate and aim for 3+/5</li>
+        <li><strong>Shortcut:</strong> Book a session with SBH to work through the planning in a structured way</li>
+      </ol>`;
+  }
+
+  // GTM insights for founder (educational)
+  let gtmSection = '';
+  if (gtm.motion) {
+    const gtmExplanations = {
+      product_led: 'Your go-to-market approach is <strong>Product-Led Growth (PLG)</strong> — customers discover, try, and buy your product on their own. This is the most capital-efficient motion, but requires a product that sells itself. Invest in onboarding, free trials, and in-app conversion.',
+      founder_led: 'Your current motion is <strong>Founder-Led Sales</strong>. This is exactly right for your first 10-20 customers — nobody sells your vision better than you. But it doesn\'t scale. Plan your transition to a hired sales team once you find repeatable messaging.',
+      enterprise_sales: 'You\'re pursuing <strong>Enterprise Sales</strong>. This means longer cycles, higher deal values, and a need for dedicated sales resources. Make sure your runway accounts for the time between first contact and first payment.',
+      hybrid: 'You have a <strong>Hybrid GTM</strong> approach — some self-serve, some sales-assisted. This is common and effective, but watch your metrics carefully: PLG customers should be profitable at low touch, while sales-assisted deals should justify the higher CAC.',
+    };
+    const gtmInsightsHtml = (gtm.insights || []).map(i =>
+      `<div style="padding:0.4rem 0.6rem;margin-top:0.4rem;background:${i.type==='warning'?'#FFF3E0':i.type==='strength'?'#E8F5E9':'#F5F5F5'};border-radius:4px;font-size:0.8rem;">${i.type==='warning'?'⚠️':i.type==='strength'?'✅':'💡'} ${i.text}</div>`
+    ).join('');
+
+    gtmSection = `
+      <h3 style="color:#130702;margin-top:1.5rem;border-bottom:1px solid #eee;padding-bottom:0.5rem;">🚀 Your Go-to-Market Strategy</h3>
+      <p style="font-size:0.85rem;line-height:1.6;">${gtmExplanations[gtm.motion] || ''}</p>
+      <table style="width:100%;font-size:0.85rem;border-collapse:collapse;margin:0.5rem 0;">
+        <tr><td style="padding:4px 0;color:#888;width:45%;">Sales Cycle</td><td style="font-weight:600;">${gtm.sales_cycle_months < 1 ? 'Quick close (under 1 month)' : gtm.sales_cycle_months + ' months'}</td></tr>
+        <tr><td style="padding:4px 0;color:#888;">CAC Payback</td><td style="font-weight:600;">${gtm.cac_payback_months} months <span style="font-size:0.75rem;color:${gtm.cac_payback_months<=12?'#4F5B45':'#9C4F38'};">${gtm.cac_payback_months<=12?'(healthy — under 12mo)':'(⚠️ over 12mo — consider pricing)'}</span></td></tr>
+        ${gtm.channels ? `<tr><td style="padding:4px 0;color:#888;">Channels</td><td>${gtm.channels}</td></tr>` : ''}
+      </table>
+      ${gtmInsightsHtml}
+      <p style="font-size:0.8rem;color:#888;margin-top:0.5rem;font-style:italic;">💡 <strong>What does this mean?</strong> Your GTM motion determines how you spend to grow. A $250 CAC with a $149/mo price means you recover your acquisition cost in ~${Math.ceil(250/(149*0.7))} months at your gross margin. That's your "payback period" — the shorter, the better.</p>
+    `;
+  }
+
+  // Runway explanation (educational)
+  let runwaySection = `
+    <h3 style="color:#130702;margin-top:1.5rem;border-bottom:1px solid #eee;padding-bottom:0.5rem;">💰 Runway & Cash: What the Numbers Mean</h3>
+    <div style="font-size:0.85rem;line-height:1.7;">
+      <p><strong>"Runway"</strong> is how many months your money will last at your current spending rate. It's the single most important number for an early-stage company.</p>
+      <table style="width:100%;font-size:0.85rem;border-collapse:collapse;margin:0.5rem 0;">
+        <tr><td style="padding:4px 0;color:#888;width:45%;">Cash in Bank</td><td style="font-weight:600;">${ef(runway.current_cash || 0)}</td></tr>
+        <tr><td style="padding:4px 0;color:#888;">Monthly Burn</td><td style="font-weight:600;">${ef(runway.current_burn || 0)}/month</td></tr>
+        <tr><td style="padding:4px 0;color:#888;">Current Runway</td><td style="font-weight:700;color:${(runway.current_runway_months||0)<6?'#9C4F38':(runway.current_runway_months||0)<12?'#B58A4B':'#4F5B45'};">${runway.current_runway_months || 0} months</td></tr>
+        <tr style="background:#f9f9f9;"><td style="padding:6px 0;color:#888;">After ${ef(fs.current_raise)} Raise</td><td style="font-weight:700;color:#4F5B45;">${runway.post_raise_runway_months || 0} months</td></tr>
+      </table>
+      <div style="background:#f9f9f9;border-radius:6px;padding:0.75rem;margin:0.5rem 0;">
+        <p style="margin:0;font-size:0.8rem;">${runway.explanation || ''}</p>
+        ${runway.burn_accelerates ? '<p style="margin:0.4rem 0 0;font-size:0.8rem;color:#B58A4B;">⚠️ Note: Your hiring plan means burn rate accelerates — actual runway will be shorter than the simple calculation above.</p>' : ''}
+      </div>
+      ${runway.post_raise_explanation ? `<p style="font-size:0.8rem;color:#666;">${runway.post_raise_explanation}</p>` : ''}
+    </div>
+
+    ${(runway.milestones_before_next_raise || []).length > 0 ? `
+    <div style="background:#E3F2FD;border-left:3px solid #1565C0;padding:0.75rem;border-radius:0 6px 6px 0;margin:0.75rem 0;">
+      <p style="margin:0 0 0.4rem;font-weight:700;color:#1565C0;font-size:0.85rem;">🎯 Key Milestones Before Your Next Raise</p>
+      <p style="margin:0;font-size:0.78rem;color:#666;">Hit these before going back to investors — each one de-risks your company and improves your position:</p>
+      <ul style="margin:0.4rem 0 0;padding-left:1.2rem;font-size:0.82rem;">
+        ${(runway.milestones_before_next_raise || []).map(m => `<li style="margin-bottom:0.25rem;">${m}</li>`).join('')}
+      </ul>
+    </div>` : ''}
+  `;
+
+  // Unit Economics explained
+  let ueSection = `
+    <h3 style="color:#130702;margin-top:1.5rem;border-bottom:1px solid #eee;padding-bottom:0.5rem;">📐 Unit Economics: The Health of Your Business</h3>
+    <p style="font-size:0.8rem;color:#666;margin-bottom:0.5rem;font-style:italic;">Unit economics answer one question: "Does it cost you more to get a customer than that customer is worth?" If yes, growing faster just means losing money faster.</p>
+    <table style="width:100%;font-size:0.85rem;border-collapse:collapse;">
+      <tr><td style="padding:6px 0;color:#888;width:50%;">Customer Acquisition Cost (CAC)</td><td style="font-weight:600;">${ef(ue.cac)}</td></tr>
+      <tr><td style="padding:6px 0;color:#888;">Customer Lifetime Value (LTV)</td><td style="font-weight:600;">${ef(ue.ltv)}</td></tr>
+      <tr style="background:#f9f9f9;"><td style="padding:6px 0;color:#888;font-weight:600;">LTV : CAC Ratio</td><td style="font-weight:700;color:${ue.ltv_cac_ratio>=3?'#4F5B45':ue.ltv_cac_ratio>=2?'#B58A4B':'#9C4F38'};">${ue.ltv_cac_ratio||0}x ${ue.ltv_cac_ratio>=3?'✅ Healthy':'⚠️ Below 3x target'}</td></tr>
+      <tr><td style="padding:6px 0;color:#888;">Payback Period</td><td style="font-weight:600;">${ue.payback_months||0} months</td></tr>
+      <tr><td style="padding:6px 0;color:#888;">Monthly Churn</td><td style="font-weight:600;">${ue.monthly_churn_pct||0}% (${ue.annual_churn_pct||0}% annually)</td></tr>
+      <tr><td style="padding:6px 0;color:#888;">Gross Margin</td><td style="font-weight:600;">${ue.gross_margin||0}%</td></tr>
+    </table>
+    <div style="background:#f9f9f9;border-radius:6px;padding:0.75rem;margin:0.5rem 0;font-size:0.8rem;">
+      <p style="margin:0;"><strong>What investors look for:</strong></p>
+      <ul style="margin:0.3rem 0 0;padding-left:1.2rem;">
+        <li><strong>LTV:CAC > 3x</strong> — you earn 3× what you spend to acquire each customer</li>
+        <li><strong>Payback < 12 months</strong> — you recover acquisition cost within a year</li>
+        <li><strong>Gross Margin > 70%</strong> — typical for SaaS; under 60% raises concerns</li>
+        <li><strong>Annual Churn < 10%</strong> — losing more than 1 in 10 customers yearly is a red flag</li>
+      </ul>
+    </div>
+  `;
+
   await transporter.sendMail({
-    from: EMAIL_USER,
+    from: `"Silicon Bayou Holdings" <${EMAIL_USER}>`,
     to: founder.email,
-    subject: `📊 Your Pro Forma Report — ${founder.company_name} (Score: ${score}/5)`,
+    subject: `Your Pro Forma Report — ${founder.company_name} | Finance Score: ${score}/5`,
     html: `
-      <div style="font-family:'Segoe UI',sans-serif;max-width:600px;margin:0 auto;color:#333;">
-        <div style="background:#130702;padding:2rem;text-align:center;border-radius:8px 8px 0 0;">
-          <h1 style="color:#FDF4E2;margin:0;font-weight:300;font-size:1.6rem;">Your Financial Model Report</h1>
-          <p style="color:#B58A4B;margin:0.25rem 0 0;font-weight:600;">Silicon Bayou Holdings · AI SaaS Pro Forma</p>
-          <p style="color:#C9B9A6;margin:0.5rem 0 0;font-size:0.85rem;">${founder.company_name} · ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+      <div style="font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;max-width:640px;margin:0 auto;color:#333;line-height:1.5;">
+        <!-- SBH Branded Header -->
+        <div style="background:#130702;padding:2rem 1.5rem;border-radius:8px 8px 0 0;">
+          <div style="text-align:center;">
+            <div style="font-family:'Barlow Semi Condensed',Arial,sans-serif;letter-spacing:4px;color:#FDF4E2;font-size:0.7rem;font-weight:600;">SILICON</div>
+            <div style="font-family:'Barlow Semi Condensed',Arial,sans-serif;color:#FDF4E2;font-size:1.8rem;font-weight:700;margin-top:-2px;letter-spacing:1px;">bayou</div>
+            <div style="width:40px;height:2px;background:#B58A4B;margin:0.5rem auto;"></div>
+            <p style="color:#B58A4B;margin:0.5rem 0 0;font-weight:600;font-size:0.85rem;">AI SaaS Founder Pro Forma</p>
+            <p style="color:#C9B9A6;margin:0.25rem 0 0;font-size:0.8rem;">${founder.company_name} · ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+          </div>
         </div>
 
-        <div style="padding:1.5rem;background:#fff;border:1px solid #C9B9A6;">
+        <div style="padding:1.5rem;background:#fff;border-left:1px solid #C9B9A6;border-right:1px solid #C9B9A6;">
           <p style="font-size:1rem;">Hi ${founder.name},</p>
-          <p>Your 5-year financial model for <strong>${founder.company_name}</strong> is ready. Here's your personalized report with actionable next steps.</p>
+          <p>Your 5-year financial model for <strong>${founder.company_name}</strong> is ready. This report breaks down what the numbers mean, where you stand, and exactly what to do next.</p>
 
-          <!-- Score -->
+          <!-- Finance Score -->
           <div style="background:${scoreBg};border-radius:12px;padding:1.25rem;margin:1.25rem 0;text-align:center;">
             <div style="font-size:3rem;font-weight:700;color:${scoreColor};line-height:1;">${score}<span style="font-size:1.2rem;font-weight:400;">/5</span></div>
             <div style="font-size:1rem;color:#333;font-weight:600;margin-top:0.25rem;">Finance Score: ${scoreLabel}</div>
-            <div style="font-size:0.8rem;color:#666;margin-top:0.25rem;">${gatesPassed.length}/${totalGates} quality gates passed</div>
+            <div style="font-size:0.78rem;color:#666;margin-top:0.25rem;">${gatesPassed.length}/${totalGates} quality gates passed</div>
             <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0.3rem;margin-top:0.75rem;">
-              ${['Assumption Transparency','Revenue Plausibility','Unit Economics','Runway Integrity','Gross Margin','Headcount','Scenario Coverage'].map((g, i) => {
+              ${['Assumptions','Revenue','Unit Econ','Runway','Margin','Headcount','Scenarios'].map((g, i) => {
                 const full = ['Assumption Transparency','Revenue Plausibility','Unit Economics Viability','Runway Integrity','Gross Margin Credibility','Headcount Coherence','Scenario Coverage'][i];
                 const passed = gatesPassed.includes(full);
-                return `<span style="font-size:0.65rem;padding:0.15rem 0.4rem;border-radius:3px;background:${passed ? 'rgba(79,91,69,0.15)' : 'rgba(0,0,0,0.05)'};color:${passed ? '#4F5B45' : '#999'};">${passed ? '✓ ' : ''}${g}</span>`;
+                return `<span style="font-size:0.6rem;padding:0.15rem 0.4rem;border-radius:3px;background:${passed?'rgba(79,91,69,0.15)':'rgba(0,0,0,0.05)'};color:${passed?'#4F5B45':'#999'};">${passed?'✓ ':''}${g}</span>`;
               }).join('')}
             </div>
+            <p style="font-size:0.75rem;color:#888;margin:0.5rem 0 0;font-style:italic;">Your Finance Score measures how complete, realistic, and investor-ready your financial model is — not whether your business is good or bad.</p>
           </div>
 
-          <!-- Key Metrics -->
-          <h3 style="color:#130702;margin-top:1.5rem;border-bottom:1px solid #eee;padding-bottom:0.5rem;">📊 Key Metrics</h3>
-          <table style="width:100%;font-size:0.9rem;border-collapse:collapse;">
-            <tr><td style="padding:6px 0;color:#888;">Monthly Price</td><td style="font-weight:600;">$${model.assumptions?.monthly_price || 99}</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Y1 Customers</td><td style="font-weight:600;">${model.assumptions?.customers_y1 || '—'}</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">CAC / LTV</td><td style="font-weight:600;">$${ue.cac||0} / $${(ue.ltv||0).toLocaleString()} (${ue.ltv_cac_ratio||0}x ratio)</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Monthly Churn</td><td style="font-weight:600;">${ue.monthly_churn_pct||0}%</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Gross Margin</td><td style="font-weight:600;">${ue.gross_margin||0}%</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Current Burn</td><td style="font-weight:600;">$${(fs.burn_rate_current||0).toLocaleString()}/mo</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Cash in Bank</td><td style="font-weight:600;">$${(fs.cash_in_bank||0).toLocaleString()}</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Current Runway</td><td style="font-weight:600;">${fs.runway_current_months||0} months</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Target Raise</td><td style="font-weight:600;">$${(fs.current_raise||0).toLocaleString()}</td></tr>
-            <tr><td style="padding:6px 0;color:#888;">Break-Even</td><td style="font-weight:600;">${fs.break_even_year ? 'Year ' + fs.break_even_year : 'Beyond Year 5'}</td></tr>
-          </table>
-
-          <!-- P&L Summary -->
+          <!-- 5-Year Projection -->
           <h3 style="color:#130702;margin-top:1.5rem;border-bottom:1px solid #eee;padding-bottom:0.5rem;">📈 5-Year Projection</h3>
+          <p style="font-size:0.8rem;color:#666;margin-bottom:0.25rem;">This is your company's financial story over 5 years — what you'll earn, spend, and how much cash you'll have.</p>
           ${pnlTable}
+          <p style="font-size:0.75rem;color:#888;font-style:italic;">Revenue = customers × price. EBITDA = what's left after all expenses. Cash = running total of money in the bank. <span style="color:#9C4F38;">Red numbers</span> mean negative / loss.</p>
           ${cashWarning}
 
-          <!-- Personalized Action Plan -->
-          ${personalizedSection}
+          <!-- Runway & Cash -->
+          ${runwaySection}
+
+          <!-- Unit Economics -->
+          ${ueSection}
+
+          <!-- GTM Strategy -->
+          ${gtmSection}
+
+          <!-- Action Plan -->
+          ${actionPlan}
 
           <!-- CTA -->
           <div style="text-align:center;margin:1.5rem 0;">
-            <a href="${siteUrl}/#report/${encodeURIComponent(founder.email)}" style="display:inline-block;background:#130702;color:#FDF4E2;padding:14px 36px;border-radius:6px;text-decoration:none;font-weight:600;font-size:1rem;">View Your Full Dashboard →</a>
+            <a href="${siteUrl}/#report/${encodeURIComponent(founder.email)}" style="display:inline-block;background:#130702;color:#FDF4E2;padding:14px 36px;border-radius:6px;text-decoration:none;font-weight:600;font-size:1rem;">View Your Full Interactive Dashboard →</a>
           </div>
 
-          <!-- SBH CTA -->
-          <div style="background:#130702;border-radius:8px;padding:1.25rem;margin:1.5rem 0;text-align:center;">
-            <h3 style="color:#FDF4E2;margin:0;">Ready for the next step?</h3>
-            <p style="color:#C9B9A6;font-size:0.85rem;margin:0.5rem 0;">Whether you're refining your model, building your pitch deck, or preparing for investor conversations — Silicon Bayou Holdings is here to help.</p>
-            <div style="margin-top:0.75rem;">
-              <a href="https://siliconbayou.ai" style="display:inline-block;background:#B58A4B;color:#FDF4E2;padding:10px 28px;border-radius:6px;text-decoration:none;font-weight:600;">Schedule a Call with SBH →</a>
+          <!-- SBH CTA Block -->
+          <div style="background:#130702;border-radius:8px;padding:1.5rem;margin:1.5rem 0;text-align:center;">
+            <div style="font-family:'Barlow Semi Condensed',Arial,sans-serif;letter-spacing:3px;color:#FDF4E2;font-size:0.6rem;font-weight:600;">SILICON</div>
+            <div style="font-family:'Barlow Semi Condensed',Arial,sans-serif;color:#FDF4E2;font-size:1.2rem;font-weight:700;margin-top:-2px;">bayou</div>
+            <p style="color:#C9B9A6;font-size:0.85rem;margin:0.75rem 0 0;">Whether you're refining your model, building your pitch, or preparing for investor conversations — we're here to help.</p>
+            <div style="margin-top:1rem;">
+              <a href="https://siliconbayou.ai" style="display:inline-block;background:#B58A4B;color:#FDF4E2;padding:12px 32px;border-radius:6px;text-decoration:none;font-weight:600;">Schedule a Call with SBH →</a>
             </div>
-            <p style="color:#676C5C;font-size:0.75rem;margin:0.5rem 0 0;">Free 30-minute consultation · No obligation · For founders at every stage</p>
+            <p style="color:#676C5C;font-size:0.7rem;margin:0.75rem 0 0;">Free 30-minute strategy session · No obligation · Pitch prep, financial modeling, investor intros</p>
           </div>
         </div>
-        <div style="text-align:center;padding:1rem;color:#959685;font-size:0.7rem;">
-          Silicon Bayou Holdings · Confidential & Proprietary<br>
-          <em>Laissez les bons temps coder!</em><br>
-          <a href="${siteUrl}/#report/${encodeURIComponent(founder.email)}" style="color:#B58A4B;">View Online</a> · <a href="mailto:becky@siliconbayou.ai" style="color:#B58A4B;">Contact Us</a>
+
+        <!-- Footer -->
+        <div style="background:#130702;text-align:center;padding:1rem 1.5rem;border-radius:0 0 8px 8px;">
+          <p style="color:#676C5C;font-size:0.7rem;margin:0;">Silicon Bayou Holdings · Confidential & Proprietary</p>
+          <p style="color:#B58A4B;font-size:0.7rem;margin:0.25rem 0 0;font-style:italic;">Laissez les bons temps coder!</p>
+          <div style="margin-top:0.5rem;">
+            <a href="${siteUrl}/#report/${encodeURIComponent(founder.email)}" style="color:#C9B9A6;font-size:0.7rem;margin:0 0.5rem;">Dashboard</a>
+            <a href="https://siliconbayou.ai" style="color:#C9B9A6;font-size:0.7rem;margin:0 0.5rem;">siliconbayou.ai</a>
+            <a href="mailto:becky@siliconbayou.ai" style="color:#C9B9A6;font-size:0.7rem;margin:0 0.5rem;">Contact</a>
+          </div>
         </div>
       </div>`
   });
