@@ -165,6 +165,14 @@ const QUESTION_MAP = {
   '6_57':'Louisiana Ops','6_58':'Regulatory','6_59':'Other Notes'
 };
 
+// ─── Request Logging ─────────────────────────────────────
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    console.log(`[API] ${req.method} ${req.path} ${req.body ? JSON.stringify(req.body).substring(0, 120) : ''}`);
+  }
+  next();
+});
+
 // ═══════════════════════════════════════════════════════════
 // FOUNDER API
 // ═══════════════════════════════════════════════════════════

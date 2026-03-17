@@ -799,6 +799,132 @@
     })}).catch(function(){});
   }
 
+  function downloadPDF(){
+    if(!state.founder_id){toast('No model to export','error');return;}
+    fetch(API+'/api/model/'+state.founder_id).then(function(r){return r.json();}).then(function(d){
+      if(d.error||!d.model){toast('Generate a model first','error');return;}
+      var m=d.model;
+      var w=window.open('','_blank');
+      if(!w){toast('Allow pop-ups to save PDF','error');return;}
+      var ef=function(n){n=Number(n)||0;if(Math.abs(n)>=1e6)return'$'+(n/1e6).toFixed(1)+'M';if(Math.abs(n)>=1e3)return'$'+Math.round(n/1e3)+'K';return'$'+n.toLocaleString();};
+      var pnl=m.five_year_pnl||[];var ue=m.unit_economics||{};var fs2=m.funding_summary||{};var cash=m.cash_position||[];var hc=m.headcount_summary||[];var arr=m.arr_waterfall||[];var gtm=m.gtm_strategy||{};var run=m.runway_analysis||{};
+      var sc=m.finance_score||{};var scColor=sc.score>=4?'#4F5B45':sc.score>=3?'#B58A4B':'#9C4F38';
+      var date=new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+
+      var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+esc(m.company_name)+' — Pro Forma Report</title>';
+      html+='<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;700&family=Manrope:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">';
+      html+='<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Manrope,sans-serif;color:#130702;background:#fff;padding:0;font-size:11px;line-height:1.5}';
+      html+='.page{padding:0.6in 0.75in;page-break-after:always;position:relative;min-height:10in}';
+      html+='.header{background:#130702;padding:1.25rem 1.5rem;display:flex;justify-content:space-between;align-items:center;margin:-0.6in -0.75in 1.5rem;padding-left:0.75in;padding-right:0.75in}';
+      html+='.logo-text{color:#FDF4E2}.logo-sm{font-size:8px;letter-spacing:4px;font-weight:600;font-family:"Barlow Semi Condensed",sans-serif}.logo-lg{font-size:22px;font-weight:700;font-family:"Barlow Semi Condensed",sans-serif;margin-top:-3px;letter-spacing:1px}';
+      html+='.subtitle{color:#B58A4B;font-size:10px;font-weight:600}.date-text{color:#959685;font-size:9px;text-align:right}';
+      html+='.footer{position:fixed;bottom:0;left:0;right:0;background:#130702;padding:0.4rem 0.75in;display:flex;justify-content:space-between;font-size:7px;color:#676C5C}';
+      html+='.footer a{color:#B58A4B;text-decoration:none}';
+      html+='h2{font-family:"Barlow Semi Condensed",sans-serif;font-size:14px;font-weight:600;margin:1.25rem 0 0.5rem;padding-bottom:0.25rem;border-bottom:1px solid #C9B9A6;color:#130702}';
+      html+='h3{font-family:"Barlow Semi Condensed",sans-serif;font-size:11px;font-weight:600;margin:0.75rem 0 0.3rem;color:#130702}';
+      html+='table{width:100%;border-collapse:collapse;font-size:10px;margin:0.3rem 0}';
+      html+='th{background:#f5f5f5;text-align:left;padding:4px 6px;font-size:9px;font-weight:600;text-transform:uppercase;color:#676C5C;letter-spacing:0.5px}';
+      html+='td{padding:3px 6px;border-bottom:1px solid #eee}';
+      html+='.mono{font-family:"IBM Plex Mono",monospace}.bold{font-weight:700}.right{text-align:right}';
+      html+='.red{color:#9C4F38}.green{color:#4F5B45}.gold{color:#B58A4B}';
+      html+='.score-box{text-align:center;padding:1rem;border-radius:8px;margin:0.5rem 0}';
+      html+='.metric-row{display:flex;gap:1rem;flex-wrap:wrap;margin:0.5rem 0}.metric-item{flex:1;min-width:90px;text-align:center;padding:0.4rem;background:#FDF4E2;border-radius:4px}';
+      html+='.metric-val{font-size:16px;font-weight:700;font-family:"Barlow Semi Condensed",sans-serif}.metric-label{font-size:8px;color:#676C5C;text-transform:uppercase;letter-spacing:0.5px}';
+      html+='.insight{padding:0.3rem 0.5rem;margin:0.2rem 0;border-radius:3px;font-size:9px}';
+      html+='.callout{padding:0.6rem 0.8rem;border-left:3px solid #B58A4B;background:#FDF4E2;border-radius:0 4px 4px 0;margin:0.5rem 0;font-size:10px}';
+      html+='@media print{.footer{position:fixed}.page{page-break-after:always}@page{margin:0;size:letter}}';
+      html+='</style></head><body>';
+
+      // PAGE 1: Summary
+      html+='<div class="page">';
+      html+='<div class="header"><div class="logo-text"><div class="logo-sm">SILICON</div><div class="logo-lg">bayou</div></div><div><div class="subtitle">AI SaaS Founder Pro Forma</div><div class="date-text">'+esc(m.company_name)+'<br>'+date+'</div></div></div>';
+      // Score
+      html+='<div class="score-box" style="background:'+(sc.score>=4?'#E8F5E9':sc.score>=3?'#FDF4E2':'#FFEBEE')+'">';
+      html+='<div style="font-size:36px;font-weight:700;color:'+scColor+';">'+sc.score+'/5</div>';
+      html+='<div style="font-size:12px;font-weight:600;">Finance Score: '+esc(sc.label||'')+'</div>';
+      html+='<div style="font-size:9px;color:#666;margin-top:2px;">'+(sc.gates_passed||[]).length+'/'+sc.total_gates+' quality gates passed</div>';
+      html+='</div>';
+      // Key metrics
+      html+='<div class="metric-row">';
+      html+='<div class="metric-item"><div class="metric-val">'+ef(pnl[0]?.revenue||0)+'</div><div class="metric-label">Y1 Revenue</div></div>';
+      html+='<div class="metric-item"><div class="metric-val">'+ef(pnl[4]?.revenue||0)+'</div><div class="metric-label">Y5 Revenue</div></div>';
+      html+='<div class="metric-item"><div class="metric-val">'+(fs2.break_even_year?'Y'+fs2.break_even_year:'Beyond Y5')+'</div><div class="metric-label">Break-Even</div></div>';
+      html+='<div class="metric-item"><div class="metric-val">'+ef(fs2.current_raise||0)+'</div><div class="metric-label">Target Raise</div></div>';
+      html+='</div>';
+      html+='<div class="metric-row">';
+      html+='<div class="metric-item"><div class="metric-val">$'+ue.cac+'</div><div class="metric-label">CAC</div></div>';
+      html+='<div class="metric-item"><div class="metric-val">'+ue.ltv_cac_ratio+'x</div><div class="metric-label">LTV:CAC</div></div>';
+      html+='<div class="metric-item"><div class="metric-val">'+ue.payback_months+'mo</div><div class="metric-label">Payback</div></div>';
+      html+='<div class="metric-item"><div class="metric-val">'+ue.gross_margin+'%</div><div class="metric-label">Gross Margin</div></div>';
+      html+='<div class="metric-item"><div class="metric-val">'+ue.monthly_churn_pct+'%</div><div class="metric-label">Monthly Churn</div></div>';
+      html+='</div>';
+      // P&L Table
+      html+='<h2>5-Year Projected P&L</h2>';
+      html+='<table><tr><th>Metric</th>';pnl.forEach(function(p){html+='<th class="right">Year '+p.year+'</th>';});html+='</tr>';
+      [{l:'Revenue',k:'revenue',b:1},{l:'COGS',k:'cogs'},{l:'Gross Profit',k:'gross_profit',b:1},{l:'Gross Margin',k:'gross_margin_pct',p:1},{l:'S&M',k:'sales_marketing'},{l:'R&D',k:'research_development'},{l:'G&A',k:'general_admin'},{l:'EBITDA',k:'ebitda',b:1},{l:'EBITDA Margin',k:'ebitda_margin_pct',p:1},{l:'Customers',k:'customers_end'}].forEach(function(row){
+        html+='<tr'+(row.b?' class="bold"':'')+'><td>'+row.l+'</td>';
+        pnl.forEach(function(p){var v=p[row.k];html+='<td class="right'+(v<0?' red':'')+'">'+( row.p?(v||0).toFixed(1)+'%':ef(v))+'</td>';});
+        html+='</tr>';
+      });
+      html+='</table>';
+      html+='</div>';
+
+      // PAGE 2: Cash, Runway, GTM
+      html+='<div class="page">';
+      html+='<div class="header"><div class="logo-text"><div class="logo-sm">SILICON</div><div class="logo-lg">bayou</div></div><div><div class="subtitle">Pro Forma Report — Continued</div><div class="date-text">'+esc(m.company_name)+'</div></div></div>';
+      // Cash Position
+      html+='<h2>Cash Position & Runway</h2>';
+      html+='<table><tr><th>Year</th><th class="right">Cash Balance</th><th class="right">Net Burn</th><th class="right">Runway</th><th>Status</th></tr>';
+      cash.forEach(function(c){
+        html+='<tr><td>Year '+c.year+'</td><td class="right '+(c.cash_balance<0?'red bold':'green')+'">'+ef(c.cash_balance)+'</td><td class="right '+(c.net_burn<0?'red':'green')+'">'+ef(c.net_burn)+'</td><td class="right">'+(c.runway_months>=60?'Cash+':c.runway_months+'mo')+'</td><td style="font-size:9px;">'+(c.milestone||'On track')+'</td></tr>';
+      });
+      html+='</table>';
+      // Runway explanation
+      if(run.explanation){
+        html+='<div class="callout"><strong>Current Runway:</strong> '+esc(run.explanation)+'</div>';
+      }
+      if(run.post_raise_explanation){
+        html+='<div class="callout" style="border-color:#4F5B45;background:#E8F5E9;"><strong>Post-Raise:</strong> '+esc(run.post_raise_explanation)+'</div>';
+      }
+      // ARR Waterfall
+      html+='<h2>ARR Waterfall</h2>';
+      html+='<table><tr><th>Year</th><th class="right">Start ARR</th><th class="right">End ARR</th><th class="right">YoY Growth</th><th class="right">Customers</th><th>Milestone</th></tr>';
+      arr.forEach(function(a){
+        html+='<tr><td>Year '+a.year+'</td><td class="right">'+ef(a.start_arr)+'</td><td class="right bold">'+ef(a.end_arr)+'</td><td class="right">'+(a.yoy_growth_pct>998?'—':a.yoy_growth_pct+'%')+'</td><td class="right">'+a.customers_end+'</td><td style="font-size:9px;" class="gold">'+(a.annotation||'')+'</td></tr>';
+      });
+      html+='</table>';
+      // Headcount
+      html+='<h2>Headcount Projection</h2>';
+      html+='<table><tr><th>Year</th><th class="right">Total</th><th class="right">Engineering</th><th class="right">Sales & Mkt</th><th class="right">G&A</th></tr>';
+      hc.forEach(function(h2){
+        html+='<tr><td>Year '+h2.year+'</td><td class="right bold">'+h2.total+'</td><td class="right">'+h2.engineering+'</td><td class="right">'+h2.sales_marketing+'</td><td class="right">'+h2.general_admin+'</td></tr>';
+      });
+      html+='</table>';
+      // GTM
+      if(gtm.motion){
+        html+='<h2>Go-to-Market Strategy</h2>';
+        html+='<p><strong>Motion:</strong> '+esc(gtm.motion_label||'')+'</p>';
+        html+='<div class="metric-row" style="margin-top:0.3rem;">';
+        html+='<div class="metric-item"><div class="metric-val">'+gtm.sales_cycle_months+'mo</div><div class="metric-label">Sales Cycle</div></div>';
+        html+='<div class="metric-item"><div class="metric-val">'+gtm.cac_payback_months+'mo</div><div class="metric-label">CAC Payback</div></div>';
+        html+='</div>';
+        (gtm.insights||[]).forEach(function(i){
+          html+='<div class="insight" style="background:'+(i.type==="warning"?"#FFF3E0":i.type==="strength"?"#E8F5E9":"#f5f5f5")+';">'+(i.type==="warning"?"⚠️ ":i.type==="strength"?"✅ ":"💡 ")+esc(i.text)+'</div>';
+        });
+      }
+      html+='</div>';
+
+      // Footer
+      html+='<div class="footer"><div>Silicon Bayou Holdings · Confidential & Proprietary</div><div><em>Laissez les bons temps coder!</em> · <a href="https://siliconbayou.ai">siliconbayou.ai</a></div></div>';
+      html+='<script>setTimeout(function(){window.print();},500);<\/script>';
+      html+='</body></html>';
+
+      w.document.write(html);
+      w.document.close();
+      w.document.title=m.company_name+' — Pro Forma Report — Silicon Bayou Holdings';
+    }).catch(function(e){toast('Error loading model: '+e.message,'error');});
+  }
+
   function generateModel(){
     if(!state.founder_id){toast('Session expired — please sign in again.','error');clearSession();location.hash='start';return;}
     app.innerHTML='<div style="text-align:center;padding:4rem;"><div style="font-size:2rem;margin-bottom:1rem;">⚙️</div><h2>Generating Your Financial Model...</h2><p class="text-muted">Building 5-year projections from your '+getAnswered()+' responses + industry benchmarks.</p></div>';
@@ -817,7 +943,7 @@
       if(d.error){app.innerHTML='<div class="card card-accent" style="text-align:center;padding:2rem;"><h2>No Model Yet</h2><p>Complete the discovery intake to generate your financial model.</p><a href="#intake" class="btn btn-dark" style="margin-top:1rem;text-decoration:none;">Go to Intake →</a></div>';return;}
       var m=d.model;var h='';
 
-      h+='<div class="card card-dark" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;"><div><h2 style="margin:0;font-size:1.5rem;">Executive Dashboard</h2><p style="color:var(--cypress-mist);margin:0;">'+esc(m.company_name)+' · '+esc(m.phase)+' · '+esc(m.vertical)+'</p></div><div style="display:flex;gap:0.5rem;"><button class="btn btn-outline btn-sm" style="color:var(--warm-cream);border-color:var(--pale-clay);" onclick="window.print()">Print / PDF</button></div></div>';
+      h+='<div class="card card-dark" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;"><div><h2 style="margin:0;font-size:1.5rem;">Executive Dashboard</h2><p style="color:var(--cypress-mist);margin:0;">'+esc(m.company_name)+' · '+esc(m.phase)+' · '+esc(m.vertical)+'</p></div><div style="display:flex;gap:0.5rem;"><button class="btn btn-outline btn-sm" style="color:var(--warm-cream);border-color:var(--pale-clay);" onclick="downloadPDF()">📄 Save PDF</button></div></div>';
 
       if(m.assumptions){
         h+='<div class="card" style="background:var(--warm-cream);"><span class="mono" style="font-size:0.65rem;color:var(--marsh-olive);text-transform:uppercase;letter-spacing:0.08em;">Key Assumptions</span><div class="metric-grid" style="margin-top:0.5rem;">';
@@ -897,7 +1023,7 @@
         h+='<div class="card card-accent"><h3 style="margin-top:0;">Funding & Break-Even</h3><div class="metric-grid"><div class="metric"><div class="metric-val" style="color:var(--ocher-gold);">'+fmt$(fs2.current_raise,true)+'</div><div class="metric-label">Current Raise</div></div><div class="metric"><div class="metric-val" style="color:var(--deep-black);">'+fmt$(fs2.total_funding_needed,true)+'</div><div class="metric-label">Total Funding</div></div><div class="metric"><div class="metric-val" style="color:'+(fs2.break_even_year?'var(--bayou-green)':'var(--ocher-gold)')+';">'+(fs2.break_even_year?'Year '+fs2.break_even_year:'Beyond Y5')+'</div><div class="metric-label">Break-Even</div></div><div class="metric"><div class="metric-val" style="color:var(--deep-black);">'+fmt$(fs2.valuation,true)+'</div><div class="metric-label">Valuation</div></div></div></div>';
       }
 
-      h+='<div class="card card-dark" style="text-align:center;"><h3 style="margin-top:0;">Ready to Go to Market?</h3><p style="color:var(--cypress-mist);">Silicon Bayou is a venture studio with C-suite specialists. We guide founders from idea through go-to-market — GTM strategy, brand, site, pitch deck, social presence, Louisiana incentives, and everything you need to launch.</p><div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;"><a href="https://siliconbayou.ai" target="_blank" class="btn btn-gold" style="text-decoration:none;">Let\'s Build Your Go-to-Market →</a><button class="btn btn-outline" style="color:var(--warm-cream);border-color:var(--pale-clay);" onclick="window.print()">Download PDF</button></div></div>';
+      h+='<div class="card card-dark" style="text-align:center;"><h3 style="margin-top:0;">Ready to Go to Market?</h3><p style="color:var(--cypress-mist);">Silicon Bayou is a venture studio with C-suite specialists. We guide founders from idea through go-to-market — GTM strategy, brand, site, pitch deck, social presence, Louisiana incentives, and everything you need to launch.</p><div style="display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:1rem;"><a href="https://siliconbayou.ai" target="_blank" class="btn btn-gold" style="text-decoration:none;">Let\'s Build Your Go-to-Market →</a><button class="btn btn-outline" style="color:var(--warm-cream);border-color:var(--pale-clay);" onclick="downloadPDF()">📄 Save PDF</button></div></div>';
 
       app.innerHTML=h;
     }).catch(function(e){app.innerHTML='<div class="card"><p class="text-danger">'+e.message+'</p></div>';});
