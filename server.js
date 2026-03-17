@@ -481,6 +481,12 @@ ${(gtm.insights||[]).map(i=>'<div class="insight" style="background:'+(i.type===
 
   // Footer
   html += `<div class="footer-bar"><div>Silicon Bayou Holdings · Confidential & Proprietary</div><div><em>Laissez les bons temps coder!</em> · <a href="https://siliconbayou.ai">siliconbayou.ai</a></div></div>
+<script>
+// Auto-trigger Save as PDF after fonts load
+window.addEventListener('load', function() {
+  setTimeout(function() { window.print(); }, 800);
+});
+</script>
 </body></html>`;
 
   res.setHeader('Content-Type', 'text/html');
