@@ -165,7 +165,8 @@ async function sendEmailQueued({ to, subject, html, type, founderId }) {
       const { Resend } = require('resend');
       const resend = new Resend(RESEND_API_KEY);
       const RESEND_FROM = process.env.RESEND_FROM || 'Silicon Bayou Holdings <onboarding@resend.dev>';
-      await resend.emails.send({ from: RESEND_FROM, to, subject, html });
+      const result = await resend.emails.send({ from: RESEND_FROM, to, subject, html });
+      if (result.error) throw new Error(result.error.message || JSON.stringify(result.error));
     } else if (transporter) {
       await transporter.sendMail({ from: `"Silicon Bayou Holdings" <${EMAIL_USER}>`, to, subject, html });
     } else {
@@ -361,13 +362,21 @@ app.post('/api/generate-model/:founder_id', (req, res) => {
     // Notify admin + send confirmation to founder
     const modelId = modelResult.lastInsertRowid;
     // Send emails (queued to DB + delivery attempted)
+    // Note: Until Resend domain is verified, all emails go to ADMIN_EMAIL (only verified recipient)
+    const RESEND_VERIFIED = process.env.RESEND_DOMAIN_VERIFIED === 'true';
+    const adminTo = ADMIN_EMAIL;
+    const founderTo = RESEND_VERIFIED ? founder.email : ADMIN_EMAIL; // Send founder email to admin too until domain verified
+
     buildAdminEmailHtml(founder, model, responseTypes, founderNotes).then(adminHtml => {
-      sendEmailQueued({ to: ADMIN_EMAIL, subject: `[Pro Forma] ${founder.company_name} — Score ${model.finance_score?.score}/5`, html: adminHtml, type: 'admin_notification', founderId: fid })
+      sendEmailQueued({ to: adminTo, subject: `[Pro Forma] ${founder.company_name} — Score ${model.finance_score?.score}/5`, html: adminHtml, type: 'admin_notification', founderId: fid })
         .then(sent => { if(sent) db.prepare(`UPDATE completions SET admin_email_sent=1 WHERE model_id=?`).run(modelId); });
     }).catch(e => console.error('[EMAIL] Admin build error:', e.message));
 
     buildFounderEmailHtml(founder, model).then(founderHtml => {
-      sendEmailQueued({ to: founder.email, subject: `Your Pro Forma Report — ${founder.company_name}`, html: founderHtml, type: 'founder_report', founderId: fid })
+      const founderSubject = RESEND_VERIFIED
+        ? `Your Pro Forma Report — ${founder.company_name}`
+        : `[FOUNDER EMAIL → ${founder.email}] Pro Forma Report — ${founder.company_name}`;
+      sendEmailQueued({ to: founderTo, subject: founderSubject, html: founderHtml, type: 'founder_report', founderId: fid })
         .then(sent => { if(sent) db.prepare(`UPDATE completions SET founder_email_sent=1 WHERE model_id=?`).run(modelId); });
     }).catch(e => console.error('[EMAIL] Founder build error:', e.message));
 
