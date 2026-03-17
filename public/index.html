@@ -800,10 +800,12 @@
   }
 
   function generateModel(){
+    if(!state.founder_id){toast('Session expired — please sign in again.','error');clearSession();location.hash='start';return;}
     app.innerHTML='<div style="text-align:center;padding:4rem;"><div style="font-size:2rem;margin-bottom:1rem;">⚙️</div><h2>Generating Your Financial Model...</h2><p class="text-muted">Building 5-year projections from your '+getAnswered()+' responses + industry benchmarks.</p></div>';
     fetch(API+'/api/generate-model/'+state.founder_id,{method:'POST',headers:{'Content-Type':'application/json'}})
     .then(function(r){return r.json();}).then(function(d){
       if(d.success){toast('Model generated!','success');location.hash='dashboard';}
+      else if(d.error && d.error.includes('not found')){toast('Session expired — please sign in again.','error');clearSession();location.hash='start';}
       else{toast(d.error||'Generation failed','error');location.hash='intake';}
     }).catch(function(e){toast(e.message,'error');location.hash='intake';});
   }
@@ -1077,13 +1079,17 @@
   var _origRenderIntake=renderIntake;
   renderIntake=function(){_origRenderIntake();setTimeout(highlightGlossaryTerms,100);};
 
-  // On startup: restore session and load responses before routing
+  // On startup: restore session and validate it still exists in the DB
   if(loadSession() && state.founder_id){
-    fetch(API+'/api/responses/'+state.founder_id).then(function(r){return r.json();}).then(function(rd){
+    fetch(API+'/api/responses/'+state.founder_id).then(function(r){
+      if(!r.ok){ clearSession(); route(); return Promise.reject('invalid'); }
+      return r.json();
+    }).then(function(rd){
+      if(!rd || !rd.responses){ clearSession(); route(); return; }
       Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
       Object.keys(rd.notes||{}).forEach(function(k){state.notes[k]=rd.notes[k];});
       route();
-    }).catch(function(){ route(); });
+    }).catch(function(e){ if(e!=='invalid'){ clearSession(); route(); } });
   } else {
     route();
   }

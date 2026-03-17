@@ -937,6 +937,101 @@ function generateFinancialModel(founder, answers) {
   const postMoney = avgValuation + targetRaise;
   const dilutionPct = postMoney > 0 ? +(targetRaise / postMoney * 100).toFixed(1) : 0;
 
+  // ─── Funding Roadmap — multi-round projection ───
+  // Simulate cash flow year-by-year, trigger raises when runway drops below 6 months
+  const fundingRounds = [];
+  let simCash = cashInBank;
+  let cumulativeDilution = 0;
+  let founderOwnership = 100;
+  const roundNames = ['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C'];
+  let roundIdx = 0;
+
+  // Determine starting round name based on phase
+  if (phase === 'pre_seed') roundIdx = 0;
+  else if (phase === 'seed') roundIdx = 1;
+  else if (phase === 'series_a') roundIdx = 2;
+  else roundIdx = 0;
+
+  // First round = current raise (if raising)
+  const isRaising = lookingToRaise.includes('Yes') || lookingToRaise.includes('actively') || lookingToRaise.includes('planning');
+  if (isRaising && targetRaise > 0) {
+    const roundDilution = postMoney > 0 ? +(targetRaise / postMoney * 100).toFixed(1) : 20;
+    founderOwnership = founderOwnership * (1 - roundDilution / 100);
+    cumulativeDilution = 100 - founderOwnership;
+    fundingRounds.push({
+      round_name: roundNames[roundIdx] || `Round ${roundIdx + 1}`,
+      timing: 'Now',
+      year: 0,
+      amount: targetRaise,
+      pre_money_valuation: avgValuation,
+      post_money_valuation: postMoney,
+      round_dilution_pct: +roundDilution,
+      founder_ownership_after: +founderOwnership.toFixed(1),
+      cumulative_dilution_pct: +cumulativeDilution.toFixed(1),
+      trigger: 'Current raise',
+      arr_at_raise: currentMRR * 12,
+    });
+    simCash += targetRaise;
+    roundIdx++;
+  }
+
+  // Walk through years — detect when additional rounds are needed
+  for (let yr = 1; yr <= 5; yr++) {
+    const yearBurn = Math.abs(pnl[yr - 1]?.ebitda || 0);
+    const yearRevenue = pnl[yr - 1]?.revenue || 0;
+    const yearARR = arrWaterfall[yr - 1]?.end_arr || 0;
+    const yearCustomers = pnl[yr - 1]?.customers_end || 0;
+
+    if (pnl[yr - 1]?.ebitda < 0) {
+      simCash += pnl[yr - 1].ebitda; // ebitda is negative = cash goes down
+    } else {
+      simCash += pnl[yr - 1].ebitda;
+    }
+
+    // Check if cash drops below 6 months of burn (trigger a raise)
+    const monthlyBurnRate = yearBurn / 12;
+    const runwayLeft = monthlyBurnRate > 0 ? simCash / monthlyBurnRate : 60;
+
+    if (simCash < 0 || (runwayLeft < 6 && pnl[yr - 1]?.ebitda < 0)) {
+      // Need to raise — calculate how much
+      // Target: 18 months of projected burn at next year's rate
+      const nextYearBurn = yr < 5 ? Math.abs(pnl[yr]?.ebitda || yearBurn * 1.3) : yearBurn * 1.3;
+      const monthlyNextBurn = nextYearBurn / 12;
+      const raiseAmount = Math.round(Math.max(monthlyNextBurn * 18, yearBurn * 0.75) / 50000) * 50000; // Round to nearest $50K
+
+      // Valuation at this point — ARR-based multiple
+      const arrMultiple = yearARR > 1000000 ? 12 : yearARR > 500000 ? 15 : yearARR > 100000 ? 18 : 20;
+      const roundPreMoney = yearARR > 0 ? Math.round(yearARR * arrMultiple) : Math.round(raiseAmount * 3.5); // 3.5x raise if no ARR
+      const roundPostMoney = roundPreMoney + raiseAmount;
+      const roundDilution = raiseAmount / roundPostMoney * 100;
+
+      founderOwnership = founderOwnership * (1 - roundDilution / 100);
+      cumulativeDilution = 100 - founderOwnership;
+
+      fundingRounds.push({
+        round_name: roundNames[roundIdx] || `Round ${roundIdx + 1}`,
+        timing: `Year ${yr}`,
+        year: yr,
+        amount: raiseAmount,
+        pre_money_valuation: roundPreMoney,
+        post_money_valuation: roundPostMoney,
+        round_dilution_pct: +roundDilution.toFixed(1),
+        founder_ownership_after: +founderOwnership.toFixed(1),
+        cumulative_dilution_pct: +cumulativeDilution.toFixed(1),
+        trigger: simCash < 0 ? 'Cash negative' : 'Runway under 6 months',
+        arr_at_raise: yearARR,
+        customers_at_raise: yearCustomers,
+        revenue_at_raise: yearRevenue,
+      });
+
+      simCash += raiseAmount;
+      roundIdx++;
+    }
+  }
+
+  // Total capital needed across all rounds
+  const totalCapitalNeeded = fundingRounds.reduce((s, r) => s + r.amount, 0);
+
   const valuationSummary = {
     methods: valuations,
     triangulated_pre_money: avgValuation,
@@ -945,6 +1040,15 @@ function generateFinancialModel(founder, answers) {
     implied_dilution_pct: dilutionPct,
     confidence: score >= 4 ? 'High' : score >= 3 ? 'Medium' : 'Low',
     confidence_note: score >= 4 ? 'Model is well-supported — valuation has strong basis' : score >= 3 ? 'Valuation is directional — some assumptions need validation' : 'Early-stage estimate only — refine model inputs for better accuracy',
+    funding_roadmap: {
+      rounds: fundingRounds,
+      total_rounds: fundingRounds.length,
+      total_capital_needed: totalCapitalNeeded,
+      final_founder_ownership_pct: +founderOwnership.toFixed(1),
+      final_cumulative_dilution_pct: +cumulativeDilution.toFixed(1),
+      break_even_year: breakEvenYear,
+      self_sustaining: breakEvenYear !== null && breakEvenYear <= 5,
+    },
     _internal: true, // Flag: this is SBH-only data
   };
 
@@ -1080,6 +1184,30 @@ async function sendAdminNotification(founder, model, responseTypes, founderNotes
     </div>`;
   }
 
+  // Funding roadmap section
+  const roadmap = val.funding_roadmap || {};
+  const rounds = roadmap.rounds || [];
+  let roadmapHtml = '';
+  if (rounds.length > 0) {
+    roadmapHtml = `<div style="margin-top:1rem;padding:1rem;background:#FFF8E1;border-left:3px solid #F57F17;border-radius:0 6px 6px 0;">
+      <p style="margin:0 0 0.5rem;font-weight:700;color:#F57F17;">💰 Funding Roadmap — ${rounds.length} Round${rounds.length>1?'s':''} Projected</p>
+      <div style="font-size:0.75rem;color:#666;margin-bottom:0.5rem;">Total capital needed: <strong>$${(roadmap.total_capital_needed||0).toLocaleString()}</strong> · Final founder ownership: <strong>${roadmap.final_founder_ownership_pct}%</strong> · ${roadmap.self_sustaining ? '✅ Self-sustaining by Year '+roadmap.break_even_year : '⚠️ Not self-sustaining within 5 years'}</div>
+      <table style="width:100%;font-size:0.72rem;border-collapse:collapse;">
+        <tr style="background:#FFF3E0;"><th style="padding:4px;text-align:left;">Round</th><th style="padding:4px;text-align:left;">When</th><th style="padding:4px;text-align:right;">Raise</th><th style="padding:4px;text-align:right;">Pre-Money</th><th style="padding:4px;text-align:right;">Dilution</th><th style="padding:4px;text-align:right;">Ownership</th><th style="padding:4px;text-align:right;">ARR</th><th style="padding:4px;text-align:left;">Trigger</th></tr>
+        ${rounds.map(r => `<tr style="border-bottom:1px solid #FFE082;">
+          <td style="padding:3px 4px;font-weight:600;">${r.round_name}</td>
+          <td style="padding:3px 4px;">${r.timing}</td>
+          <td style="padding:3px 4px;text-align:right;font-weight:600;">$${r.amount.toLocaleString()}</td>
+          <td style="padding:3px 4px;text-align:right;">$${r.pre_money_valuation.toLocaleString()}</td>
+          <td style="padding:3px 4px;text-align:right;color:#E65100;">${r.round_dilution_pct}%</td>
+          <td style="padding:3px 4px;text-align:right;font-weight:600;">${r.founder_ownership_after}%</td>
+          <td style="padding:3px 4px;text-align:right;">$${(r.arr_at_raise||0).toLocaleString()}</td>
+          <td style="padding:3px 4px;font-size:0.65rem;color:#888;">${r.trigger}</td>
+        </tr>`).join('')}
+      </table>
+    </div>`;
+  }
+
   // GTM section
   let gtmHtml = '';
   if (gtm.motion) {
@@ -1125,6 +1253,7 @@ async function sendAdminNotification(founder, model, responseTypes, founderNotes
 
           ${pnlHtml}
           ${valHtml}
+          ${roadmapHtml}
           ${gtmHtml}
           ${defaultsHtml}
           ${notesHtml}
