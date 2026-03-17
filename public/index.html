@@ -177,7 +177,17 @@
   var API = '';
   var app = document.getElementById('app');
   var nav = document.getElementById('nav');
-  var state = { founder_id: null, email: null, responses: {}, page: 'start', currentModule: 1, currentQ: 0 }; // mode: 'founder' or 'advisor'
+  var state = { founder_id: null, email: null, name: null, company: null, responses: {}, page: 'start', currentModule: 1, currentQ: 0 };
+
+  // ─── Session Persistence ───
+  function saveSession() {
+    if (state.founder_id) localStorage.setItem('sbh_pf_session', JSON.stringify({ founder_id: state.founder_id, email: state.email, name: state.name, company: state.company }));
+  }
+  function loadSession() {
+    try { var s = JSON.parse(localStorage.getItem('sbh_pf_session') || 'null'); if (s && s.founder_id) { state.founder_id = s.founder_id; state.email = s.email; state.name = s.name; state.company = s.company; return true; } } catch(e) {}
+    return false;
+  }
+  function clearSession() { localStorage.removeItem('sbh_pf_session'); state.founder_id = null; state.email = null; state.name = null; state.company = null; state.responses = {}; }
 
   // ─── Questions Data ──────────────────────────
   var MODULES = [
@@ -421,20 +431,33 @@
 
   // ─── Router ──────────────────────────────────
   function route(){
-    var hash=location.hash.replace('#','')||'start';
+    var hash=location.hash.replace('#','')||'';
     var parts=hash.split('/');
+    // Auto-load session on first route
+    if(!state.founder_id) loadSession();
+    // Default: returning user → home, new user → start
+    if(!hash || hash==='start') {
+      if(state.founder_id) { location.hash='home'; return; }
+      else { renderStart(); updateNav('start'); return; }
+    }
     if(parts[0]==='admin')renderAdmin();
     else if(parts[0]==='report')renderReport(parts[1]);
+    else if(parts[0]==='home'&&state.founder_id)renderHome();
     else if(parts[0]==='intake'&&state.founder_id)renderIntake();
     else if(parts[0]==='dashboard'&&state.founder_id)renderDashboard();
-    else renderStart();
+    else if(parts[0]==='logout'){clearSession();location.hash='start';return;}
+    else if(state.founder_id){renderHome();}
+    else{renderStart();}
     updateNav(parts[0]);
   }
   window.addEventListener('hashchange',route);
 
   function updateNav(page){
-    var links=[{id:'start',label:'Start'},{id:'intake',label:'Discovery'},{id:'dashboard',label:'Dashboard'},{id:'report',label:'Report'}];
-    nav.innerHTML=links.map(function(l){return'<a href="#'+l.id+'" class="'+(page===l.id?'active':'')+'"'+(l.id!=='start'&&!state.founder_id?' style="opacity:0.3;pointer-events:none"':'')+'>'+l.label+'</a>';}).join('');
+    var links = state.founder_id
+      ? [{id:'home',label:'🏠 Home'},{id:'intake',label:'📝 Discovery'},{id:'dashboard',label:'📊 Dashboard'}]
+      : [{id:'start',label:'Start'}];
+    nav.innerHTML=links.map(function(l){return'<a href="#'+l.id+'" class="'+(page===l.id?'active':'')+'">'+l.label+'</a>';}).join('')
+      + (state.founder_id ? '<a href="#logout" style="margin-left:auto;opacity:0.5;font-size:0.75rem;">Sign Out</a>' : '');
   }
 
   // ─── Start / Registration ───────────────────
@@ -448,20 +471,21 @@
       this.disabled=true;this.textContent='Starting...';
       fetch(API+'/api/founders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,name:name,company_name:company})})
       .then(function(r){return r.json();}).then(function(d){
-        if(d.success){state.founder_id=d.founder_id;state.email=email;
+        if(d.success){state.founder_id=d.founder_id;state.email=email;state.name=name;state.company=company;
           state.responses['1_1']=company;
           state.currentModule=1;state.currentQ=1;
-          // Save company name in background, don't wait
+          saveSession();
           saveResponse('1_1',company);
-          // Load existing responses in background for returning users
-          if(d.existing){
-            fetch(API+'/api/responses/'+d.founder_id).then(function(r){return r.json();}).then(function(rd){
-              Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
-            }).catch(function(){});
-          }
-          // Navigate immediately — force render even if hash unchanged
-          location.hash='intake';
-          route();
+          // Load existing responses
+          fetch(API+'/api/responses/'+d.founder_id).then(function(r){return r.json();}).then(function(rd){
+            Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
+            // Returning user with responses → go to home; new user → intake
+            if(d.existing && Object.keys(rd.responses||{}).length > 2){
+              location.hash='home'; route();
+            } else {
+              location.hash='intake'; route();
+            }
+          }).catch(function(){ location.hash='intake'; route(); });
         }else{document.getElementById('startError').textContent=d.error||'Error';document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='Begin Discovery →';}
       }).catch(function(e){document.getElementById('startError').textContent=e.message;document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='Begin Discovery →';});
     });
@@ -469,6 +493,116 @@
   }
 
   // ─── Guided Intake ──────────────────────────
+  // ─── Home — Returning User Dashboard ───────
+  function renderHome(){
+    app.innerHTML='<div style="text-align:center;padding:2rem;" class="text-muted">Loading your workspace...</div>';
+    // Load responses + model in parallel
+    Promise.all([
+      fetch(API+'/api/responses/'+state.founder_id).then(function(r){return r.json();}),
+      fetch(API+'/api/model/'+state.founder_id).then(function(r){return r.json();}).catch(function(){return{error:true};})
+    ]).then(function(results){
+      var rd = results[0];
+      var md = results[1];
+      // Sync responses into state
+      Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
+      var answered = getAnswered();
+      var totalQ = 59;
+      var pct = Math.round(answered/totalQ*100);
+      var hasModel = md && md.model && !md.error;
+      var model = hasModel ? md.model : null;
+
+      var h = '';
+      // Welcome back header
+      h+='<div class="card card-dark" style="padding:1.75rem;">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;">';
+      h+='<div><h2 style="margin:0;font-size:1.4rem;font-weight:300;">Welcome back, '+esc(state.name||'Founder')+'</h2>';
+      h+='<p style="color:var(--cypress-mist);margin:0.25rem 0 0;font-size:0.9rem;">'+esc(state.company||'Your Company')+' · '+esc(state.email)+'</p></div>';
+      h+='<div style="display:flex;gap:0.5rem;flex-wrap:wrap;">';
+      h+='<a href="#intake" class="btn btn-gold" style="text-decoration:none;font-size:0.85rem;">'+(pct>=100?'✏️ Edit Answers':'📝 Continue Discovery')+'</a>';
+      if(hasModel) h+='<a href="#dashboard" class="btn btn-outline" style="text-decoration:none;color:var(--warm-cream);border-color:var(--pale-clay);font-size:0.85rem;">📊 View Dashboard</a>';
+      h+='</div></div></div>';
+
+      // Progress overview
+      h+='<div class="card card-accent"><h3 style="margin-top:0;font-size:1rem;">Discovery Progress</h3>';
+      h+='<div style="background:var(--pale-clay);border-radius:6px;height:10px;margin:0.75rem 0;overflow:hidden;"><div style="background:var(--bayou-green);height:100%;width:'+pct+'%;border-radius:6px;transition:width 0.5s;"></div></div>';
+      h+='<div style="display:flex;justify-content:space-between;font-size:0.82rem;"><span><strong>'+answered+'</strong> of '+totalQ+' questions answered ('+pct+'%)</span>';
+      if(pct<100) h+='<span class="text-muted">~'+Math.round((totalQ-answered)*0.6)+' min remaining</span>';
+      else h+='<span style="color:var(--bayou-green);">✓ Complete</span>';
+      h+='</div>';
+
+      // Module breakdown
+      h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:0.5rem;margin-top:1rem;">';
+      MODULES.forEach(function(m,i){
+        var mAns=0; m.questions.forEach(function(q){if(state.responses[m.num+'_'+q.q])mAns++;});
+        var mPct=Math.round(mAns/m.questions.length*100);
+        var isDone=mPct===100;
+        h+='<div style="background:var(--warm-cream);border-radius:8px;padding:0.65rem 0.85rem;cursor:pointer;border:1px solid '+(isDone?'var(--bayou-green)':'var(--pale-clay)')+';transition:all 0.2s;" onclick="state.currentModule='+(i+1)+';state.currentQ=0;location.hash=\'intake\'">';
+        h+='<div style="display:flex;justify-content:space-between;align-items:center;">';
+        h+='<span class="mono" style="font-size:0.65rem;color:var(--marsh-olive);">Module '+(i+1)+'</span>';
+        h+='<span style="font-size:0.65rem;color:'+(isDone?'var(--bayou-green)':'var(--muted)')+';font-weight:600;">'+mAns+'/'+m.questions.length+'</span>';
+        h+='</div>';
+        h+='<div style="font-size:0.82rem;font-weight:600;margin-top:0.2rem;">'+esc(m.title)+'</div>';
+        h+='<div style="background:var(--pale-clay);border-radius:3px;height:4px;margin-top:0.4rem;overflow:hidden;"><div style="background:'+(isDone?'var(--bayou-green)':'var(--ocher-gold)')+';height:100%;width:'+mPct+'%;"></div></div>';
+        h+='</div>';
+      });
+      h+='</div></div>';
+
+      // Model status
+      if(hasModel){
+        var sc=model.finance_score;
+        var scColor=sc.score>=4?'var(--bayou-green)':sc.score>=3?'var(--ocher-gold)':'var(--brick-red)';
+        h+='<div class="card" style="border-left:4px solid '+scColor+';">';
+        h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;">';
+        h+='<div><h3 style="margin:0;font-size:1rem;">📊 Financial Model Generated</h3>';
+        h+='<p class="text-muted" style="margin:0.2rem 0 0;font-size:0.82rem;">Generated: '+esc(md.generated_at||'').replace('T',' ').slice(0,19)+'</p></div>';
+        h+='<div style="display:flex;gap:1rem;align-items:center;">';
+        h+='<div style="text-align:center;"><div style="font-size:1.8rem;font-weight:700;color:'+scColor+';">'+sc.score+'/5</div><div class="mono text-muted" style="font-size:0.6rem;">'+esc(sc.label)+'</div></div>';
+        h+='<a href="#dashboard" class="btn btn-dark" style="text-decoration:none;">View Full Dashboard →</a>';
+        h+='</div></div>';
+
+        // Quick stats
+        if(model.five_year_pnl && model.five_year_pnl.length){
+          h+='<div class="metric-grid" style="margin-top:1rem;">';
+          h+='<div class="metric"><div class="metric-val">'+fmt$(model.five_year_pnl[0].revenue,true)+'</div><div class="metric-label">Y1 Revenue</div></div>';
+          h+='<div class="metric"><div class="metric-val">'+fmt$(model.five_year_pnl[4].revenue,true)+'</div><div class="metric-label">Y5 Revenue</div></div>';
+          var be = model.funding_summary && model.funding_summary.break_even_year;
+          h+='<div class="metric"><div class="metric-val">'+(be?'Year '+be:'Beyond Y5')+'</div><div class="metric-label">Break-Even</div></div>';
+          h+='<div class="metric"><div class="metric-val">'+fmt$(model.funding_summary.current_raise,true)+'</div><div class="metric-label">Target Raise</div></div>';
+          h+='</div>';
+        }
+        h+='</div>';
+
+        // Re-generate button
+        h+='<div class="card" style="text-align:center;padding:1rem;"><p class="text-muted" style="font-size:0.82rem;margin:0 0 0.5rem;">Updated your answers? Regenerate to see updated projections.</p>';
+        h+='<button class="btn btn-dark" onclick="generateModel()">🔄 Regenerate Model</button></div>';
+      } else {
+        // No model yet
+        h+='<div class="card card-dark" style="text-align:center;padding:1.5rem;">';
+        if(pct>=50){
+          h+='<h3 style="margin-top:0;">Ready to Generate Your Model?</h3>';
+          h+='<p style="color:var(--cypress-mist);">You\'ve answered '+answered+' questions ('+pct+'%). You can generate now or continue filling in more details for a more accurate model.</p>';
+          h+='<div style="display:flex;gap:1rem;justify-content:center;margin-top:1rem;">';
+          h+='<button class="btn btn-gold" onclick="generateModel()">Generate Pro Forma →</button>';
+          h+='<a href="#intake" class="btn btn-outline" style="text-decoration:none;color:var(--warm-cream);border-color:var(--pale-clay);">Continue Discovery</a>';
+          h+='</div>';
+        } else {
+          h+='<h3 style="margin-top:0;">Keep Going!</h3>';
+          h+='<p style="color:var(--cypress-mist);">Complete at least 50% of the intake to generate your financial model. You\'re at '+pct+'% — '+Math.max(0,Math.ceil(totalQ*0.5)-answered)+' more questions to go.</p>';
+          h+='<a href="#intake" class="btn btn-gold" style="text-decoration:none;">Continue Discovery →</a>';
+        }
+        h+='</div>';
+      }
+
+      // SBH CTA
+      h+='<div class="card" style="border-left:4px solid var(--ocher-gold);">';
+      h+='<h4 style="margin:0;font-size:0.9rem;">💡 Need help with your answers?</h4>';
+      h+='<p style="font-size:0.82rem;color:var(--muted);margin:0.25rem 0 0;">The Silicon Bayou team can walk through this with you and help refine your projections. <a href="https://siliconbayou.ai" target="_blank" style="color:var(--ocher-gold);font-weight:600;">Schedule a call →</a></p>';
+      h+='</div>';
+
+      app.innerHTML=h;
+    });
+  }
+
   function renderIntake(){
     var mod=MODULES[state.currentModule-1];
     var q=mod.questions[state.currentQ];
@@ -904,7 +1038,15 @@
   var _origRenderIntake=renderIntake;
   renderIntake=function(){_origRenderIntake();setTimeout(highlightGlossaryTerms,100);};
 
-  route();
+  // On startup: restore session and load responses before routing
+  if(loadSession() && state.founder_id){
+    fetch(API+'/api/responses/'+state.founder_id).then(function(r){return r.json();}).then(function(rd){
+      Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
+      route();
+    }).catch(function(){ route(); });
+  } else {
+    route();
+  }
 })();
 </script>
 </body>
