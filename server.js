@@ -164,7 +164,8 @@ async function sendEmailQueued({ to, subject, html, type, founderId }) {
     if (useResend && RESEND_API_KEY) {
       const { Resend } = require('resend');
       const resend = new Resend(RESEND_API_KEY);
-      await resend.emails.send({ from: `Silicon Bayou Holdings <${EMAIL_USER}>`, to, subject, html });
+      const RESEND_FROM = process.env.RESEND_FROM || 'Silicon Bayou Holdings <onboarding@resend.dev>';
+      await resend.emails.send({ from: RESEND_FROM, to, subject, html });
     } else if (transporter) {
       await transporter.sendMail({ from: `"Silicon Bayou Holdings" <${EMAIL_USER}>`, to, subject, html });
     } else {
