@@ -102,6 +102,13 @@ db.exec(`
 // Migrations
 try { db.exec("ALTER TABLE financial_models ADD COLUMN follow_up_sent INTEGER DEFAULT 0"); } catch(e) {}
 try { db.exec("ALTER TABLE financial_models ADD COLUMN confirmation_sent INTEGER DEFAULT 0"); } catch(e) {}
+try { db.exec(`CREATE TABLE IF NOT EXISTS email_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  to_email TEXT NOT NULL, subject TEXT NOT NULL, html_body TEXT NOT NULL,
+  email_type TEXT DEFAULT 'notification', founder_id INTEGER,
+  status TEXT DEFAULT 'queued', error_message TEXT,
+  created_at TEXT DEFAULT (datetime('now')), sent_at TEXT
+)`); } catch(e) {}
 
 console.log('✓ Database connected:', dbPath);
 
@@ -109,32 +116,68 @@ console.log('✓ Database connected:', dbPath);
 const EMAIL_USER = process.env.EMAIL_USER || 'becky@siliconbayou.ai';
 const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD || 'ltqnybjdaejcyhca';
 const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 let transporter = null;
-try {
-  if (EMAIL_USER && EMAIL_PASSWORD) {
-    const nodemailer = require('nodemailer');
-    transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: 465,
-      secure: true,
-      auth: { user: EMAIL_USER, pass: EMAIL_PASSWORD },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-    });
-    // Verify SMTP connection on startup
-    transporter.verify().then(() => {
-      console.log('✓ Email SMTP verified — connection works');
-    }).catch(e => {
-      console.error('⚠ Email SMTP verify FAILED:', e.message);
-      console.error('  Host:', SMTP_HOST, '| User:', EMAIL_USER);
-    });
-    console.log('✓ Email configured:', EMAIL_USER);
-  } else {
-    console.log('⚠ Email not configured');
+let useResend = false;
+
+// Try Resend first (HTTP-based, works on Railway)
+if (RESEND_API_KEY) {
+  useResend = true;
+  console.log('✓ Email configured via Resend API');
+} else {
+  // Fall back to SMTP
+  try {
+    if (EMAIL_USER && EMAIL_PASSWORD) {
+      const nodemailer = require('nodemailer');
+      transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: EMAIL_USER, pass: EMAIL_PASSWORD },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 20000,
+      });
+      transporter.verify().then(() => {
+        console.log('✓ Email SMTP verified — connection works');
+      }).catch(e => {
+        console.error('⚠ Email SMTP verify FAILED:', e.message);
+        console.error('  Emails will be queued in database — view at #admin');
+      });
+      console.log('✓ Email configured via SMTP:', EMAIL_USER);
+    } else {
+      console.log('⚠ Email not configured');
+    }
+  } catch (e) {
+    console.log('⚠ Email error:', e.message);
   }
-} catch (e) {
-  console.log('⚠ Email error:', e.message);
+}
+
+// Unified email sender — queues to DB + attempts delivery
+async function sendEmailQueued({ to, subject, html, type, founderId }) {
+  // Always queue to database first
+  const queueResult = db.prepare('INSERT INTO email_queue (to_email, subject, html_body, email_type, founder_id) VALUES (?,?,?,?,?)')
+    .run(to, subject, html, type || 'notification', founderId || null);
+  const queueId = queueResult.lastInsertRowid;
+  console.log(`[EMAIL] Queued #${queueId}: ${type} → ${to}`);
+
+  // Try sending
+  try {
+    if (useResend && RESEND_API_KEY) {
+      const { Resend } = require('resend');
+      const resend = new Resend(RESEND_API_KEY);
+      await resend.emails.send({ from: `Silicon Bayou Holdings <${EMAIL_USER}>`, to, subject, html });
+    } else if (transporter) {
+      await transporter.sendMail({ from: `"Silicon Bayou Holdings" <${EMAIL_USER}>`, to, subject, html });
+    } else {
+      throw new Error('No email transport available');
+    }
+    db.prepare("UPDATE email_queue SET status=?, sent_at=datetime('now') WHERE id=?").run('sent', queueId);
+    console.log(`[EMAIL] ✅ Sent #${queueId}: ${type} → ${to}`);
+    return true;
+  } catch (e) {
+    db.prepare('UPDATE email_queue SET status=?, error_message=? WHERE id=?').run('failed', e.message, queueId);
+    console.error(`[EMAIL] ❌ Failed #${queueId}: ${e.message}`);
+    return false;
+  }
 }
 
 // ─── Auth ────────────────────────────────────────────────
@@ -316,18 +359,16 @@ app.post('/api/generate-model/:founder_id', (req, res) => {
 
     // Notify admin + send confirmation to founder
     const modelId = modelResult.lastInsertRowid;
-    if (transporter) {
-      console.log(`[EMAIL] Sending admin notification for ${founder.company_name} to ${ADMIN_EMAIL}...`);
-      sendAdminNotification(founder, model, responseTypes, founderNotes)
-        .then(() => { console.log(`[EMAIL] ✅ Admin notification SENT to ${ADMIN_EMAIL}`); db.prepare(`UPDATE completions SET admin_email_sent=1 WHERE model_id=?`).run(modelId); })
-        .catch(e => console.error(`[EMAIL] ❌ Admin email FAILED: ${e.message}\n${e.stack}`));
-      console.log(`[EMAIL] Sending founder report to ${founder.email}...`);
-      sendFounderReport(founder, model)
-        .then(() => { console.log(`[EMAIL] ✅ Founder report SENT to ${founder.email}`); db.prepare(`UPDATE completions SET founder_email_sent=1 WHERE model_id=?`).run(modelId); })
-        .catch(e => console.error(`[EMAIL] ❌ Founder report FAILED: ${e.message}\n${e.stack}`));
-    } else {
-      console.log('[EMAIL] ⚠️ No email transporter — emails NOT sent');
-    }
+    // Send emails (queued to DB + delivery attempted)
+    buildAdminEmailHtml(founder, model, responseTypes, founderNotes).then(adminHtml => {
+      sendEmailQueued({ to: ADMIN_EMAIL, subject: `[Pro Forma] ${founder.company_name} — Score ${model.finance_score?.score}/5`, html: adminHtml, type: 'admin_notification', founderId: fid })
+        .then(sent => { if(sent) db.prepare(`UPDATE completions SET admin_email_sent=1 WHERE model_id=?`).run(modelId); });
+    }).catch(e => console.error('[EMAIL] Admin build error:', e.message));
+
+    buildFounderEmailHtml(founder, model).then(founderHtml => {
+      sendEmailQueued({ to: founder.email, subject: `Your Pro Forma Report — ${founder.company_name}`, html: founderHtml, type: 'founder_report', founderId: fid })
+        .then(sent => { if(sent) db.prepare(`UPDATE completions SET founder_email_sent=1 WHERE model_id=?`).run(modelId); });
+    }).catch(e => console.error('[EMAIL] Founder build error:', e.message));
 
     res.json({ success: true, model });
   } catch (err) {
@@ -550,6 +591,35 @@ app.get('/api/admin/completions', authenticateAdmin, (req, res) => {
     ORDER BY c.completed_at DESC LIMIT 100
   `).all();
   res.json({ completions: rows });
+});
+
+// GET /api/admin/emails — View email queue
+app.get('/api/admin/emails', authenticateAdmin, (req, res) => {
+  const rows = db.prepare('SELECT id, to_email, subject, email_type, status, error_message, created_at, sent_at FROM email_queue ORDER BY created_at DESC LIMIT 50').all();
+  res.json({ emails: rows });
+});
+
+// GET /api/admin/emails/:id — View single email HTML
+app.get('/api/admin/emails/:id', authenticateAdmin, (req, res) => {
+  const row = db.prepare('SELECT * FROM email_queue WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Email not found' });
+  res.json(row);
+});
+
+// POST /api/admin/emails/:id/retry — Retry sending a failed email
+app.post('/api/admin/emails/:id/retry', authenticateAdmin, async (req, res) => {
+  const row = db.prepare('SELECT * FROM email_queue WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Email not found' });
+  const sent = await sendEmailQueued({ to: row.to_email, subject: row.subject, html: row.html_body, type: row.email_type, founderId: row.founder_id });
+  res.json({ success: true, sent });
+});
+
+// GET /api/admin/emails/:id/preview — Render email HTML in browser
+app.get('/api/admin/emails/:id/preview', authenticateAdmin, (req, res) => {
+  const row = db.prepare('SELECT * FROM email_queue WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).send('Not found');
+  res.setHeader('Content-Type', 'text/html');
+  res.send(row.html_body);
 });
 
 app.get('/api/admin/analytics', authenticateAdmin, (req, res) => {
@@ -1248,8 +1318,7 @@ function generateFinancialModel(founder, answers) {
 }
 
 // ─── Admin Notification (with defaults + notes) ─────────
-async function sendAdminNotification(founder, model, responseTypes, founderNotes) {
-  if (!transporter) return;
+async function buildAdminEmailHtml(founder, model, responseTypes, founderNotes) {
   const score = model.finance_score?.score || 0;
   const scoreEmoji = score >= 4 ? '🟢' : score >= 3 ? '🟡' : '🔴';
   responseTypes = responseTypes || {};
@@ -1349,12 +1418,7 @@ async function sendAdminNotification(founder, model, responseTypes, founderNotes
     </div>`;
   }
 
-  await transporter.sendMail({
-    from: EMAIL_USER,
-    to: ADMIN_EMAIL,
-    subject: `📊 Pro Forma Complete — ${founder.company_name} ${scoreEmoji} ${score}/5 | Val: $${val.triangulated_pre_money ? (val.triangulated_pre_money/1e6).toFixed(1)+'M' : 'N/A'} ${defaultKeys.length > 0 ? `| ${defaultKeys.length} defaults` : ''} ${noteKeys.length > 0 ? `| ${noteKeys.length} notes` : ''}`,
-    html: `
-      <div style="font-family:'Segoe UI',sans-serif;max-width:680px;margin:0 auto;color:#333;">
+  return `<div style="font-family:'Segoe UI',sans-serif;max-width:680px;margin:0 auto;color:#333;">
         <div style="background:#130702;padding:1.5rem;text-align:center;border-radius:8px 8px 0 0;">
           <h2 style="color:#FDF4E2;margin:0;font-weight:300;letter-spacing:2px;">SILICON BAYOU HOLDINGS</h2>
           <p style="color:#B58A4B;margin:0.25rem 0 0;font-weight:600;">Pro Forma Completion Report · Admin View</p>
@@ -1390,14 +1454,11 @@ async function sendAdminNotification(founder, model, responseTypes, founderNotes
         <div style="text-align:center;padding:0.75rem;color:#959685;font-size:0.7rem;">
           Silicon Bayou Holdings · Confidential<br>Generated: ${new Date().toISOString().replace('T',' ').slice(0,19)} UTC
         </div>
-      </div>`
-  });
-  console.log('✓ Admin notification sent');
+      </div>`;
 }
 
 // ─── Founder Report Email — SBH Branded, Educational, Score-Driven ───
-async function sendFounderReport(founder, model) {
-  if (!transporter) return;
+async function buildFounderEmailHtml(founder, model) {
   const score = model.finance_score?.score || 0;
   const scoreLabel = model.finance_score?.label || '';
   const gatesPassed = model.finance_score?.gates_passed || [];
@@ -1564,11 +1625,7 @@ async function sendFounderReport(founder, model) {
     </div>
   `;
 
-  await transporter.sendMail({
-    from: `"Silicon Bayou Holdings" <${EMAIL_USER}>`,
-    to: founder.email,
-    subject: `Your Pro Forma Report — ${founder.company_name} | Finance Score: ${score}/5`,
-    html: `
+  return `
       <div style="font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;max-width:640px;margin:0 auto;color:#333;line-height:1.5;">
         <!-- SBH Branded Header -->
         <div style="background:#130702;padding:2rem 1.5rem;border-radius:8px 8px 0 0;">
@@ -1646,9 +1703,7 @@ async function sendFounderReport(founder, model) {
             <a href="mailto:becky@siliconbayou.ai" style="color:#C9B9A6;font-size:0.7rem;margin:0 0.5rem;">Contact</a>
           </div>
         </div>
-      </div>`
-  });
-  console.log(`✓ Founder report email sent to ${founder.email}`);
+      </div>`;
 }
 
 // ─── 7-Day Follow-Up Email ───────────────────────────────
