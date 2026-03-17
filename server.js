@@ -318,102 +318,215 @@ function generateFinancialModel(founder, answers) {
   const phase = founder.phase || 'idea';
   const bench = BENCHMARKS[phase] || BENCHMARKS.idea;
 
-  // Extract answers with benchmark fallbacks
+  // ─── ANSWER EXTRACTION ───
+  // Keys are "module_question" where question is the GLOBAL number (1-59)
+  // Module 1: q1-8, Module 2: q9-19, Module 3: q20-28, Module 4: q29-48, Module 5: q49-56, Module 6: q57-59
   const g = (key, fallback) => {
     const v = answers[key];
     return v && v.trim() ? v.trim() : (fallback !== undefined ? String(fallback) : '');
   };
-  const gn = (key, fallback) => parseFloat(g(key, fallback)) || fallback || 0;
+  // Parse number — strip $, commas, % signs
+  const gn = (key, fallback) => {
+    const raw = g(key, '');
+    if (!raw) return fallback || 0;
+    const cleaned = raw.replace(/[$,%\s]/g, '').replace(/,/g, '');
+    return parseFloat(cleaned) || fallback || 0;
+  };
 
   const companyName = founder.company_name;
-  const currentMRR = gn('2_14', 0);
-  const mrrGrowth = gn('2_16', bench.mrr_growth) / 100;
-  const grossMargin = gn('2_15', bench.gross_margin) / 100;
-  const monthlyChurn = gn('2_17', bench.churn) / 100;
-  const cac = gn('3_24', bench.cac);
-  const acv = gn('3_25', bench.acv);
-  const ltv_cac = gn('3_26', 3);
-  const monthlyBurn = gn('4_31', bench.burn);
+
+  // ── Module 1: About Your Business ──
   const teamSize = gn('1_6', bench.team);
-  const hiringPlan = gn('4_33', 3);
-  const avgSalary = gn('4_34', 85000);
-  const benefitsBurden = gn('4_35', 25) / 100;
-  const hostingCost = gn('4_36', 1000);
-  const toolsCost = gn('4_37', 300);
-  const workspaceCost = gn('4_38', 0);
-  const legalCost = gn('4_40', 5000);
-  const targetRaise = gn('1_10', bench.raise);
-  const valuation = gn('5_42', bench.valuation);
-  const timeToRevenue = gn('2_19', phase === 'idea' ? 6 : 0);
-  const aiCostPct = gn('2_20', 20) / 100;
+  const coFounders = gn('1_7', 2);
+
+  // ── Module 2: Money Coming In ──
+  const monthlyPrice = gn('2_10', bench.acv / 12);            // q10: Price point per month
+  const currentMRR = gn('2_12', 0);                            // q12: Current monthly revenue
+  const monthsToRevenue = gn('2_13', phase === 'idea' ? 6 : 0); // q13: Months until first revenue
+  const customersIn6Mo = gn('2_14', 5);                        // q14: Customers in first 6 months
+  const customersEndY1 = gn('2_15', 25);                       // q15: Customers by end of Year 1
+  const customersEndY2 = gn('2_16', 100);                      // q16: Customers by end of Year 2
+  const stickinessRaw = g('2_17', '6-12 months');              // q17: Customer stickiness (qualitative)
+  const expansionRaw = g('2_18', 'Yes');                       // q18: Revenue expansion
+  const revenueRiskRaw = g('2_19', 'No');                      // q19: Single customer concentration
+
+  // Derive monthly churn from stickiness answer
+  const churnMap = { 'Less than 3 months': 25, '3-6 months': 12, '6-12 months': 6, '1-2 years': 3, '2+ years': 1.5 };
+  let monthlyChurn = bench.churn / 100;
+  for (const [k, v] of Object.entries(churnMap)) {
+    if (stickinessRaw.includes(k.split(' ')[0])) { monthlyChurn = v / 100; break; }
+  }
+
+  // Derive expansion rate
+  const hasExpansion = expansionRaw.toLowerCase().startsWith('yes');
+  const expansionRate = hasExpansion ? 0.02 : 0;  // 2% monthly net expansion if yes
+
+  // ACV from monthly price
+  const acv = monthlyPrice * 12;
+  const grossMargin = bench.gross_margin / 100;
+
+  // ── Module 3: Getting Customers ──
+  const marketingBudget = gn('3_21', 2000);                    // q21: Marketing per month
+  const cac = gn('3_25', bench.cac);                           // q25: Cost to get a customer
+
+  // ── Module 4: Money Going Out ──
+  const currentBurn = gn('4_29', bench.burn);                  // q29: Current monthly spending
+  const cashInBank = gn('4_30', 50000);                        // q30: Cash in bank
+  const founderSalary = gn('4_31', 0);                         // q31: Current founder salary
+  const founderSalaryTarget = gn('4_33', 80000);               // q33: Target founder salary
+  const hiresY1 = gn('4_34', 2);                               // q34: People to hire Year 1
+  const hiresY2 = gn('4_36', 4);                               // q36: People to hire Year 2
+  const avgSalary = gn('4_37', 85000);                         // q37: Average salary new hires
+  const contractorCost = gn('4_38', 2000);                     // q38: Monthly contractors
+  const hostingCost = gn('4_39', 500);                         // q39: Monthly hosting
+  const aiApiCost = gn('4_40', 300);                           // q40: Monthly AI/API costs
+  const toolsCost = gn('4_42', 300);                           // q42: Monthly tools
+  const workspaceCost = gn('4_43', 0);                         // q43: Monthly workspace
+  const legalAnnual = gn('4_44', 12000);                       // q44: Annual legal/accounting
+  const insuranceAnnual = gn('4_45', 0);                       // q45: Annual insurance
+  const hardwarePerHire = gn('4_46', 2500);                    // q46: Equipment per hire
+  const otherMonthlyCost = gn('4_47', 0);                      // q47: Other monthly
+  const costBuffer = gn('4_48', 10) / 100;                     // q48: Surprise cost buffer %
+
+  // ── Module 5: Funding & Goals ──
+  const moneyRaisedSoFar = gn('5_49', 0);                     // q49: Money raised so far
+  const lookingToRaise = g('5_51', 'Yes');                     // q51: Looking to raise?
+  const targetRaise = gn('5_52', bench.raise);                 // q52: How much raising
+  const useOfFunds = g('5_53', 'Product development, sales hire, marketing'); // q53: Use of funds
+  const bigGoal = g('5_55', '$5-10M');                         // q55: Big goal
+  const exitStrategy = g('5_56', 'No preference');             // q56: Exit strategy
+
+  // Benefits burden (standard 25% — taxes, insurance, 401k)
+  const benefitsBurden = 0.25;
+
+  // ─── BUILD 5-YEAR CUSTOMER + REVENUE MODEL ───
+  // Use actual customer count targets to build realistic revenue
+  const customersByYear = [];
+  const currentCustomers = currentMRR > 0 ? Math.round(currentMRR / monthlyPrice) || 1 : 0;
+
+  // Year 1: from intake answer
+  customersByYear.push(Math.max(customersEndY1, currentCustomers));
+  // Year 2: from intake answer
+  customersByYear.push(customersEndY2);
+  // Years 3-5: extrapolate growth rate from Y1→Y2
+  const y1y2Growth = customersEndY2 > customersEndY1 ? customersEndY2 / customersEndY1 : 2;
+  const sustainedGrowth = Math.min(y1y2Growth, 3); // cap at 3x/year
+  for (let yr = 3; yr <= 5; yr++) {
+    // Growth rate decelerates: Y3 = Y1-Y2 rate × 0.75, Y4 × 0.6, Y5 × 0.5
+    const decel = yr === 3 ? 0.75 : yr === 4 ? 0.6 : 0.5;
+    const growthRate = 1 + (sustainedGrowth - 1) * decel;
+    customersByYear.push(Math.round(customersByYear[yr - 2] * growthRate));
+  }
+
+  // Monthly price with expansion (prices grow ~5%/year if expansion revenue exists)
+  const priceByYear = [];
+  for (let yr = 1; yr <= 5; yr++) {
+    priceByYear.push(monthlyPrice * Math.pow(hasExpansion ? 1.05 : 1, yr - 1));
+  }
 
   // ─── 5-Year P&L ───
   const pnl = [];
-  let mrr = currentMRR;
   let employees = teamSize;
-  const annualHireRate = hiringPlan;
+  let founderPaid = founderSalary > 0;
 
   for (let yr = 1; yr <= 5; yr++) {
-    // MRR grows monthly, compound for 12 months
-    let yearMRR = mrr;
-    for (let m = 1; m <= 12; m++) {
-      if (yr === 1 && m <= timeToRevenue) continue; // pre-revenue months
-      yearMRR *= (1 + mrrGrowth);
-      yearMRR *= (1 - monthlyChurn); // net of churn
-    }
-    const revenue = (mrr + yearMRR) / 2 * 12; // average MRR * 12
-    const cogs = revenue * (1 - grossMargin);
+    // Revenue: customers × monthly price × 12, adjusted for churn and ramp
+    const endCustomers = customersByYear[yr - 1];
+    const startCustomers = yr === 1 ? currentCustomers : customersByYear[yr - 2];
+    const avgCustomers = (startCustomers + endCustomers) / 2;
+
+    // Apply pre-revenue months (Year 1 only)
+    const revenueMonths = yr === 1 ? Math.max(0, 12 - monthsToRevenue) : 12;
+    const effectiveCustomers = yr === 1 ? avgCustomers * (revenueMonths / 12) : avgCustomers;
+    const revenue = effectiveCustomers * priceByYear[yr - 1] * 12;
+
+    // COGS: hosting + AI/API scale with customers, plus basic infrastructure
+    const scaledHosting = hostingCost * Math.pow(endCustomers / Math.max(customersEndY1, 1), 0.7) * 12;
+    const scaledAI = aiApiCost * Math.pow(endCustomers / Math.max(customersEndY1, 1), 0.8) * 12;
+    const cogsBase = scaledHosting + scaledAI;
+    const cogs = Math.max(cogsBase, revenue * (1 - grossMargin));
     const grossProfit = revenue - cogs;
 
-    employees += annualHireRate * (yr <= 2 ? 1 : yr <= 4 ? 1.5 : 2);
-    const totalComp = employees * avgSalary * (1 + benefitsBurden);
-    const salesMarketing = revenue * (yr <= 2 ? 0.35 : yr <= 4 ? 0.25 : 0.20);
-    const rd = totalComp * 0.55;
-    const ga = totalComp * 0.15 + (hostingCost + toolsCost + workspaceCost) * 12 + legalCost;
+    // Headcount
+    const newHires = yr === 1 ? hiresY1 : yr === 2 ? hiresY2 : Math.round(hiresY2 * (yr === 3 ? 1.25 : yr === 4 ? 1.5 : 1.75));
+    employees += newHires;
+
+    // Compensation
+    const founderComp = coFounders * (founderPaid || yr >= 2 ? founderSalaryTarget : founderSalary);
+    if (yr >= 2) founderPaid = true;
+    const employeeComp = (employees - coFounders) * avgSalary;
+    const totalComp = (founderComp + employeeComp) * (1 + benefitsBurden);
+
+    // Hardware for new hires
+    const hardwareCost = newHires * hardwarePerHire;
+
+    // Sales & Marketing
+    const salesMarketing = marketingBudget * 12 + (yr >= 2 ? avgSalary * Math.ceil(employees * 0.2) * 0.3 : 0); // marketing + commissions
+
+    // R&D (engineering portion of comp + tools)
+    const engPct = 0.55;
+    const rd = totalComp * engPct;
+
+    // G&A
+    const monthlyOverhead = (toolsCost + workspaceCost + contractorCost + otherMonthlyCost) * 12;
+    const ga = totalComp * 0.15 + monthlyOverhead + legalAnnual + insuranceAnnual + hardwareCost;
+
     const totalOpex = salesMarketing + rd + ga;
-    const ebitda = grossProfit - totalOpex;
-    const netIncome = ebitda * (ebitda > 0 ? 0.75 : 1); // rough tax
+    const bufferAmount = totalOpex * costBuffer;
+    const totalOpexWithBuffer = totalOpex + bufferAmount;
+
+    const ebitda = grossProfit - totalOpexWithBuffer;
+    const netIncome = ebitda * (ebitda > 0 ? 0.78 : 1); // ~22% effective tax
 
     pnl.push({
       year: yr,
+      customers_end: endCustomers,
       revenue: Math.round(revenue),
       cogs: Math.round(cogs),
       gross_profit: Math.round(grossProfit),
       gross_margin_pct: revenue > 0 ? +(grossProfit / revenue * 100).toFixed(1) : 0,
+      total_compensation: Math.round(totalComp),
       sales_marketing: Math.round(salesMarketing),
       research_development: Math.round(rd),
       general_admin: Math.round(ga),
-      total_opex: Math.round(totalOpex),
+      cost_buffer: Math.round(bufferAmount),
+      total_opex: Math.round(totalOpexWithBuffer),
       ebitda: Math.round(ebitda),
       ebitda_margin_pct: revenue > 0 ? +(ebitda / revenue * 100).toFixed(1) : 0,
       net_income: Math.round(netIncome),
+      new_hires: newHires,
     });
-
-    mrr = yearMRR;
   }
 
   // ─── ARR Waterfall ───
   const arrWaterfall = [];
   let prevARR = currentMRR * 12;
   for (let yr = 1; yr <= 5; yr++) {
-    const endARR = pnl[yr - 1].revenue * 1.1; // approximate
-    const newARR = endARR * 0.6;
-    const churned = prevARR * monthlyChurn * 12;
-    const expansion = endARR * 0.1;
+    const endCustomers = customersByYear[yr - 1];
+    const startCustomers = yr === 1 ? currentCustomers : customersByYear[yr - 2];
+    const endARR = endCustomers * priceByYear[yr - 1] * 12;
+    const startARR = prevARR;
+    const newCustomers = endCustomers - startCustomers + Math.round(startCustomers * monthlyChurn * 12); // gross new = net new + replaced churn
+    const newARR = newCustomers * priceByYear[yr - 1] * 12;
+    const churned = Math.round(startCustomers * monthlyChurn * 12) * priceByYear[yr - 1] * 12;
+    const expansion = hasExpansion ? startARR * expansionRate * 12 : 0;
     const yoy = prevARR > 0 ? ((endARR - prevARR) / prevARR * 100) : (endARR > 0 ? 999 : 0);
+
     const annotations = [];
-    if (yr === 1 && prevARR === 0) annotations.push('First Revenue');
-    if (endARR >= 1000000 && prevARR < 1000000) annotations.push('$1M ARR');
-    if (endARR >= 10000000 && prevARR < 10000000) annotations.push('$10M ARR');
+    if (yr === 1 && prevARR === 0 && endARR > 0) annotations.push('First Revenue');
+    if (endARR >= 1000000 && prevARR < 1000000) annotations.push('$1M ARR 🎉');
+    if (endARR >= 10000000 && prevARR < 10000000) annotations.push('$10M ARR 🚀');
 
     arrWaterfall.push({
       year: yr,
-      start_arr: Math.round(prevARR),
+      start_arr: Math.round(startARR),
       new_arr: Math.round(newARR),
       churned_arr: Math.round(churned),
       expansion_arr: Math.round(expansion),
       end_arr: Math.round(endARR),
       end_mrr: Math.round(endARR / 12),
+      customers_end: endCustomers,
+      avg_revenue_per_customer: Math.round(priceByYear[yr - 1] * 12),
       yoy_growth_pct: +Math.min(yoy, 999).toFixed(1),
       annotation: annotations.join(', ') || null,
     });
@@ -424,51 +537,66 @@ function generateFinancialModel(founder, answers) {
   const headcount = [];
   let hc = teamSize;
   for (let yr = 1; yr <= 5; yr++) {
-    hc += annualHireRate * (yr <= 2 ? 1 : yr <= 4 ? 1.5 : 2);
+    hc += pnl[yr - 1].new_hires;
+    // Role split based on hiring plan question (q35)
+    const roleRaw = g('4_35', 'Mix');
+    const engSplit = roleRaw.includes('engineer') ? 0.65 : roleRaw.includes('sales') ? 0.25 : 0.50;
+    const smSplit = roleRaw.includes('sales') ? 0.50 : roleRaw.includes('engineer') ? 0.15 : 0.30;
+    const gaSplit = 1 - engSplit - smSplit;
     headcount.push({
       year: yr, total: Math.round(hc),
-      engineering: Math.round(hc * 0.50),
-      sales_marketing: Math.round(hc * 0.30),
-      general_admin: Math.round(hc * 0.20),
+      engineering: Math.round(hc * engSplit),
+      sales_marketing: Math.round(hc * smSplit),
+      general_admin: Math.round(hc * gaSplit),
     });
   }
 
   // ─── Cash Position ───
   const cashPosition = [];
-  let cash = targetRaise;
+  let cash = cashInBank + (lookingToRaise.includes('Yes') || lookingToRaise.includes('actively') ? targetRaise : moneyRaisedSoFar);
   for (let yr = 1; yr <= 5; yr++) {
-    const netBurn = pnl[yr - 1].ebitda; // EBITDA proxy for cash flow
+    const netBurn = pnl[yr - 1].ebitda;
     cash += netBurn;
-    const runway = netBurn >= 0 ? 60 : Math.max(0, Math.round(cash / Math.abs(netBurn / 12)));
+    const monthlyNetBurn = netBurn / 12;
+    const runway = monthlyNetBurn >= 0 ? 60 : Math.max(0, Math.round(cash / Math.abs(monthlyNetBurn)));
     let milestone = null;
     if (netBurn >= 0 && (yr === 1 || pnl[yr - 2]?.ebitda < 0)) milestone = 'Cash flow positive';
-    if (cash < 0) milestone = 'Cash negative — raise needed';
-    if (yr === 3 && cash > 0 && netBurn < 0) milestone = 'Bridge round needed';
-    cashPosition.push({ year: yr, cash_balance: Math.round(cash), net_burn: Math.round(netBurn), runway_months: runway, milestone });
+    if (cash < 0) milestone = '⚠️ Cash negative — raise needed';
+    if (cash > 0 && cash < Math.abs(netBurn) * 0.5 && netBurn < 0) milestone = '⚠️ Bridge round needed';
+    if (runway > 0 && runway <= 6 && netBurn < 0) milestone = '⚠️ Under 6 months runway';
+    cashPosition.push({ year: yr, cash_balance: Math.round(cash), net_burn: Math.round(netBurn), runway_months: Math.min(runway, 60), milestone });
   }
 
   // ─── Unit Economics ───
-  const ltv = acv / (monthlyChurn > 0 ? monthlyChurn * 12 : 0.5);
-  const payback = cac > 0 && acv > 0 ? Math.round(cac / (acv / 12)) : 18;
+  const annualChurn = 1 - Math.pow(1 - monthlyChurn, 12);
+  const ltv = annualChurn > 0 ? acv / annualChurn : acv * 5;
+  const payback = cac > 0 && monthlyPrice > 0 ? Math.round(cac / monthlyPrice) : 18;
 
   const unitEconomics = {
-    cac, ltv: Math.round(ltv), ltv_cac_ratio: +(ltv / cac).toFixed(1),
+    cac, ltv: Math.round(ltv), ltv_cac_ratio: cac > 0 ? +(ltv / cac).toFixed(1) : 0,
     payback_months: payback,
-    acv, monthly_churn: +(monthlyChurn * 100).toFixed(1),
+    acv, monthly_price: monthlyPrice,
+    monthly_churn_pct: +(monthlyChurn * 100).toFixed(1),
+    annual_churn_pct: +(annualChurn * 100).toFixed(1),
     gross_margin: +(grossMargin * 100).toFixed(1),
     customer_segment: founder.customer_type || 'B2B - SMB',
+    has_expansion: hasExpansion,
   };
 
   // ─── Funding Summary ───
   const breakEvenYear = pnl.findIndex(p => p.ebitda >= 0) + 1 || null;
-  const totalFundingNeeded = breakEvenYear ? pnl.slice(0, breakEvenYear - 1).reduce((s, p) => s + Math.abs(Math.min(0, p.ebitda)), 0) + targetRaise : targetRaise * 3;
+  const cumulativeLoss = pnl.reduce((sum, p) => sum + (p.ebitda < 0 ? Math.abs(p.ebitda) : 0), 0);
+  const totalFundingNeeded = Math.max(targetRaise, cumulativeLoss + cashInBank * 0.2); // need enough to cover losses + safety
 
   const fundingSummary = {
+    cash_in_bank: cashInBank,
+    money_raised_so_far: moneyRaisedSoFar,
     current_raise: targetRaise,
     total_funding_needed: Math.round(totalFundingNeeded),
     break_even_year: breakEvenYear,
-    valuation,
-    use_of_proceeds: g('5_47', '50% Product, 30% S&M, 20% Ops'),
+    use_of_proceeds: useOfFunds,
+    burn_rate_current: Math.round(currentBurn),
+    runway_current_months: currentBurn > 0 ? Math.round(cashInBank / currentBurn) : 60,
   };
 
   // ─── Finance Score (1-5) ───
@@ -476,7 +604,7 @@ function generateFinancialModel(founder, answers) {
   const answered = Object.keys(answers).filter(k => answers[k] && answers[k].trim()).length;
   if (answered >= 20) gates.push('Assumption Transparency');
   if (pnl[4]?.revenue > 0 && pnl[0]?.revenue >= 0) gates.push('Revenue Plausibility');
-  if (ltv / cac >= 2.0) gates.push('Unit Economics Viability');
+  if (cac > 0 && ltv / cac >= 2.0) gates.push('Unit Economics Viability');
   if (cashPosition[0]?.runway_months >= 12 || cashPosition[0]?.net_burn >= 0) gates.push('Runway Integrity');
   if (grossMargin >= 0.50) gates.push('Gross Margin Credibility');
   if (headcount[0]?.total <= 50 && headcount[4]?.total <= 500) gates.push('Headcount Coherence');
@@ -507,9 +635,24 @@ function generateFinancialModel(founder, answers) {
     funding_summary: fundingSummary,
     finance_score: financeScore,
     assumptions: {
-      mrr_growth: +(mrrGrowth * 100).toFixed(1), gross_margin: +(grossMargin * 100).toFixed(1),
-      monthly_churn: +(monthlyChurn * 100).toFixed(1), cac, acv, monthly_burn: monthlyBurn,
-      team_size: teamSize, target_raise: targetRaise
+      monthly_price: monthlyPrice,
+      customers_y1: customersEndY1,
+      customers_y2: customersEndY2,
+      gross_margin: +(grossMargin * 100).toFixed(1),
+      monthly_churn: +(monthlyChurn * 100).toFixed(1),
+      cac, acv,
+      burn_rate: currentBurn,
+      team_size: teamSize,
+      hires_y1: hiresY1,
+      hires_y2: hiresY2,
+      avg_salary: avgSalary,
+      founder_salary: founderSalaryTarget,
+      target_raise: targetRaise,
+      months_to_revenue: monthsToRevenue,
+      hosting_monthly: hostingCost,
+      ai_api_monthly: aiApiCost,
+      marketing_monthly: marketingBudget,
+      cost_buffer_pct: +(costBuffer * 100).toFixed(0),
     },
   };
 }
