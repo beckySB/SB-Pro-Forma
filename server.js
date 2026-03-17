@@ -554,6 +554,55 @@ app.get('/api/report/:email', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// CROSS-APP LINK API — GTM Strategy pulls financial context
+// ═══════════════════════════════════════════════════════════
+app.get('/api/link/:email', (req, res) => {
+  // CORS: allow GTM app to call this
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const founder = db.prepare('SELECT * FROM founders WHERE email = ?').get(decodeURIComponent(req.params.email).toLowerCase().trim());
+  if (!founder) return res.status(404).json({ linked: false });
+  const modelRow = db.prepare('SELECT model_json, generated_at FROM financial_models WHERE founder_id = ? ORDER BY generated_at DESC LIMIT 1').get(founder.id);
+  if (!modelRow) return res.json({ linked: true, has_model: false, founder: { company: founder.company_name, phase: founder.phase, vertical: founder.vertical } });
+  const model = JSON.parse(modelRow.model_json);
+  delete model._valuation; // Never expose
+  // Extract only GTM-relevant financial context
+  const ue = model.unit_economics || {};
+  const arr = model.arr_waterfall || [];
+  const cash = model.cash_position || {};
+  const funding = model.funding_summary || {};
+  const pnl = model.five_year_pnl || {};
+  const runway = model.runway_analysis || {};
+  const gtm = model.gtm_strategy || {};
+  res.json({
+    linked: true,
+    has_model: true,
+    generated_at: modelRow.generated_at,
+    founder: { company: founder.company_name, phase: founder.phase, vertical: founder.vertical, customer_type: founder.customer_type },
+    finance_score: model.finance_score || null,
+    financials: {
+      mrr: ue.current_mrr,
+      arr: arr.length > 0 ? arr[0]?.arr : null,
+      acv: ue.acv,
+      cac: ue.cac,
+      ltv: ue.ltv,
+      ltv_cac_ratio: ue.ltv_cac_ratio,
+      monthly_churn: ue.monthly_churn_pct,
+      annual_churn: ue.annual_churn_pct,
+      gross_margin: ue.gross_margin_pct,
+      payback_months: ue.payback_months,
+      monthly_burn: cash.monthly_burn,
+      runway_months: runway.months_remaining || cash.runway_months,
+      cash_on_hand: cash.current_cash,
+      arr_year1: arr.length >= 1 ? arr[0]?.arr : null,
+      arr_year3: arr.length >= 3 ? arr[2]?.arr : null,
+      revenue_year1: pnl.year1?.revenue,
+      revenue_year3: pnl.year3?.revenue,
+    },
+    gtm_from_proforma: gtm,
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
 // ADMIN API
 // ═══════════════════════════════════════════════════════════
 
