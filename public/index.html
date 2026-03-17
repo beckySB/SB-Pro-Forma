@@ -809,10 +809,13 @@
 
   function saveResponse(key,value,type){
     state.responses[key]=value;
+    saveSession();
     var parts=key.split('_');
     fetch(API+'/api/responses',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
       founder_id:state.founder_id,module_number:parseInt(parts[0]),question_number:parseInt(parts[1]),response_value:value,response_type:type||'founder_provided'
-    })}).catch(function(){});
+    })}).then(function(r){
+      if(!r.ok){console.error('[SAVE FAIL] '+key+' status:'+r.status);toast('Save failed — check connection','error');}
+    }).catch(function(e){console.error('[SAVE FAIL] '+key+' '+e.message);toast('Save failed — check connection','error');});
   }
 
   function downloadPDF(){
