@@ -429,6 +429,21 @@
   function fmtPct(n){return(Number(n)||0).toFixed(1)+'%';}
   function getAnswered(){return Object.keys(state.responses).filter(function(k){return state.responses[k]&&state.responses[k].trim();}).length;}
 
+  // Find the first unanswered question and set currentModule/currentQ there
+  function resumeAtNextUnanswered(){
+    for(var mi=0;mi<MODULES.length;mi++){
+      var m=MODULES[mi];
+      for(var qi=0;qi<m.questions.length;qi++){
+        var key=m.num+'_'+m.questions[qi].q;
+        if(!state.responses[key]||!state.responses[key].trim()){
+          state.currentModule=m.num;state.currentQ=qi;return;
+        }
+      }
+    }
+    // All answered — go to last question
+    state.currentModule=MODULES.length;state.currentQ=MODULES[MODULES.length-1].questions.length-1;
+  }
+
   // ─── Router ──────────────────────────────────
   function route(){
     var hash=location.hash.replace('#','')||'';
@@ -473,20 +488,21 @@
       .then(function(r){return r.json();}).then(function(d){
         if(d.success){state.founder_id=d.founder_id;state.email=email;state.name=name;state.company=company;
           state.responses['1_1']=company;
-          state.currentModule=1;state.currentQ=1;
           saveSession();
           saveResponse('1_1',company);
           // Load existing responses
           fetch(API+'/api/responses/'+d.founder_id).then(function(r){return r.json();}).then(function(rd){
             Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
             Object.keys(rd.notes||{}).forEach(function(k){state.notes[k]=rd.notes[k];});
-            // Returning user with responses → go to home; new user → intake
+            // Returning user with responses → go to home; brand new → intake at Q1
             if(d.existing && Object.keys(rd.responses||{}).length > 2){
+              resumeAtNextUnanswered();
               location.hash='home'; route();
             } else {
+              state.currentModule=1;state.currentQ=1;
               location.hash='intake'; route();
             }
-          }).catch(function(){ location.hash='intake'; route(); });
+          }).catch(function(){ state.currentModule=1;state.currentQ=0; location.hash='intake'; route(); });
         }else{document.getElementById('startError').textContent=d.error||'Error';document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='Begin Discovery →';}
       }).catch(function(e){document.getElementById('startError').textContent=e.message;document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='Begin Discovery →';});
     });
@@ -520,7 +536,7 @@
       h+='<div><h2 style="margin:0;font-size:1.4rem;font-weight:300;">Welcome back, '+esc(state.name||'Founder')+'</h2>';
       h+='<p style="color:var(--cypress-mist);margin:0.25rem 0 0;font-size:0.9rem;">'+esc(state.company||'Your Company')+' · '+esc(state.email)+'</p></div>';
       h+='<div style="display:flex;gap:0.5rem;flex-wrap:wrap;">';
-      h+='<a href="#intake" class="btn btn-gold" style="text-decoration:none;font-size:0.85rem;">'+(pct>=100?'✏️ Edit Answers':'📝 Continue Discovery')+'</a>';
+      h+='<a href="#intake" class="btn btn-gold" style="text-decoration:none;font-size:0.85rem;" onclick="resumeAtNextUnanswered()">'+(pct>=100?'✏️ Edit Answers':'📝 Continue Discovery')+'</a>';
       if(hasModel) h+='<a href="#dashboard" class="btn btn-outline" style="text-decoration:none;color:var(--warm-cream);border-color:var(--pale-clay);font-size:0.85rem;">📊 View Dashboard</a>';
       h+='</div></div></div>';
 
@@ -1214,6 +1230,7 @@
       if(!rd || !rd.responses){ clearSession(); route(); return; }
       Object.keys(rd.responses||{}).forEach(function(k){state.responses[k]=rd.responses[k].value;});
       Object.keys(rd.notes||{}).forEach(function(k){state.notes[k]=rd.notes[k];});
+      resumeAtNextUnanswered();
       route();
     }).catch(function(e){ if(e!=='invalid'){ clearSession(); route(); } });
   } else {
